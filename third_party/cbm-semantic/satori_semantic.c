@@ -5,6 +5,11 @@
 #include "common/type_registry.h"
 #include "common/lsp_node_iter.h"
 #include "languages/go/go_lsp.h"
+#include "languages/java/java_lsp.h"
+#include "languages/csharp/cs_lsp.h"
+#include "languages/cpp/c_lsp.h"
+#include "languages/rust/rust_lsp.h"
+#include "languages/rust/rust_cargo.h"
 #include "minimal-compat/cbm_compat.h"
 #include "tree_sitter/api.h"
 #include "helpers.h"
@@ -13,8 +18,19 @@
 #include <stdio.h>
 
 extern const TSLanguage *tree_sitter_go(void);
+extern const TSLanguage *tree_sitter_java(void);
+extern const TSLanguage *tree_sitter_c_sharp(void);
+extern const TSLanguage *tree_sitter_cpp(void);
+extern const TSLanguage *tree_sitter_rust(void);
 
-#define SATORI_ENGINE_VERSION_STR "cbm-d150ebe4+satori-go-semantic-v3"
+/* Satori deliberately routes .c through the C++ analyzer. Upstream c_lsp.c
+ * still references its dormant C-mode parser branch, so satisfy that link
+ * symbol with the same grammar Satori already treats as authoritative. */
+const TSLanguage *tree_sitter_c(void) {
+    return tree_sitter_cpp();
+}
+
+#define SATORI_ENGINE_VERSION_STR "cbm-d150ebe4+satori-multilang-semantic-v1"
 
 typedef struct {
     char *path;
@@ -173,7 +189,13 @@ int satori_semantic_create(const char *language, uint32_t language_len, SatoriSe
     }
     *out_handle = 0;
 
-    if (!language || language_len != 2 || memcmp(language, "go", 2) != 0) {
+    bool supported_language = language
+        && ((language_len == 2 && memcmp(language, "go", 2) == 0)
+            || (language_len == 4 && memcmp(language, "java", 4) == 0)
+            || (language_len == 3 && memcmp(language, "cpp", 3) == 0)
+            || (language_len == 4 && memcmp(language, "rust", 4) == 0)
+            || (language_len == 6 && memcmp(language, "csharp", 6) == 0));
+    if (!supported_language) {
         set_global_error("Unsupported semantic language");
         return SATORI_SEMANTIC_ERR_INVALID_ARGUMENT;
     }
@@ -349,6 +371,58 @@ static uint8_t map_strategy(const char *strat) {
     return SATORI_STRATEGY_UNKNOWN;
 }
 
+static uint8_t map_strategy_for_language(const char *language, const char *strategy) {
+    if (!language || !strategy) return SATORI_STRATEGY_UNKNOWN;
+    if (strcmp(language, "go") == 0) return map_strategy(strategy);
+    if (strcmp(language, "java") == 0) {
+        if (strcmp(strategy, "lsp_static_call") == 0 ||
+            strcmp(strategy, "lsp_static_import") == 0) {
+            return SATORI_STRATEGY_DIRECT_CALL;
+        }
+        if (strstr(strategy, "interface")) return SATORI_STRATEGY_INTERFACE_DISPATCH;
+        if (strstr(strategy, "dispatch") || strstr(strategy, "this") ||
+            strstr(strategy, "super") || strstr(strategy, "outer")) {
+            return SATORI_STRATEGY_TYPE_DISPATCH;
+        }
+    }
+    if (strcmp(language, "csharp") == 0) {
+        if (strcmp(strategy, "cs_static_typed") == 0 ||
+            strcmp(strategy, "cs_using_static") == 0 ||
+            strcmp(strategy, "cs_namespace_func") == 0) {
+            return SATORI_STRATEGY_DIRECT_CALL;
+        }
+        if (strstr(strategy, "method") || strstr(strategy, "inherited") ||
+            strstr(strategy, "self")) {
+            return SATORI_STRATEGY_TYPE_DISPATCH;
+        }
+    }
+    if (strcmp(language, "cpp") == 0) {
+        if (strcmp(strategy, "lsp_direct") == 0 ||
+            strcmp(strategy, "lsp_scoped") == 0 ||
+            strcmp(strategy, "lsp_template") == 0) {
+            return SATORI_STRATEGY_DIRECT_CALL;
+        }
+        if (strcmp(strategy, "lsp_implicit_this") == 0 ||
+            strcmp(strategy, "lsp_type_dispatch") == 0 ||
+            strcmp(strategy, "lsp_base_dispatch") == 0 ||
+            strcmp(strategy, "lsp_virtual_dispatch") == 0 ||
+            strcmp(strategy, "lsp_smart_ptr_dispatch") == 0) {
+            return SATORI_STRATEGY_TYPE_DISPATCH;
+        }
+    }
+    if (strcmp(language, "rust") == 0) {
+        if (strcmp(strategy, "lsp_direct") == 0) {
+            return SATORI_STRATEGY_DIRECT_CALL;
+        }
+        if (strstr(strategy, "method") || strstr(strategy, "trait") ||
+            strstr(strategy, "deref") || strstr(strategy, "ufcs") ||
+            strstr(strategy, "constructor")) {
+            return SATORI_STRATEGY_TYPE_DISPATCH;
+        }
+    }
+    return SATORI_STRATEGY_UNKNOWN;
+}
+
 typedef struct {
     const char *qualified_name;
     const char *file_path;
@@ -357,6 +431,8 @@ typedef struct {
     uint32_t end_byte;
     const char *package_qn;
     const char *import_path;
+    const char *authority_root;
+    uint8_t target_kind;
 } SatoriDefLoc;
 
 typedef struct {
@@ -373,7 +449,7 @@ typedef enum {
 
 static int def_locs_add(SatoriDefLocArray *arr, const char *qn, const char *path,
                         uint32_t path_len, uint32_t start, uint32_t end,
-                        const char *package_qn, const char *import_path) {
+                        const char *package_qn, const char *import_path, uint8_t target_kind) {
     if (!arr || !qn || !path || !package_qn) return SATORI_SEMANTIC_ERR_INVALID_ARGUMENT;
     if (arr->count >= SATORI_MAX_DEFINITIONS) {
         return SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
@@ -393,8 +469,22 @@ static int def_locs_add(SatoriDefLocArray *arr, const char *qn, const char *path
     arr->items[arr->count].end_byte = end;
     arr->items[arr->count].package_qn = package_qn;
     arr->items[arr->count].import_path = import_path;
+    arr->items[arr->count].authority_root = NULL;
+    arr->items[arr->count].target_kind = target_kind;
     arr->count++;
     return SATORI_SEMANTIC_OK;
+}
+
+static int def_locs_add_with_authority(SatoriDefLocArray *arr, const char *qn, const char *path,
+                                       uint32_t path_len, uint32_t start, uint32_t end,
+                                       const char *package_qn, const char *import_path,
+                                       uint8_t target_kind, const char *authority_root) {
+    int status = def_locs_add(arr, qn, path, path_len, start, end,
+                              package_qn, import_path, target_kind);
+    if (status == SATORI_SEMANTIC_OK && arr->count > 0) {
+        arr->items[arr->count - 1].authority_root = authority_root;
+    }
+    return status;
 }
 
 static SatoriDefLookupState def_locs_find_unique(const SatoriDefLocArray *arr, const char *qn,
@@ -588,6 +678,30 @@ static const SatoriGoModule *go_find_nearest_module(const SatoriGoModuleTable *m
         size_t root_len = strlen(candidate->root);
         if (!best || root_len > best_len) {
             best = candidate;
+            best_len = root_len;
+        }
+    }
+    return best;
+}
+
+static const char *find_nearest_manifest_root(CBMArena *arena,
+                                               const SatoriAuxiliaryFile *auxiliaries,
+                                               uint32_t aux_count,
+                                               const char *normalized_source_path) {
+    if (!arena || !normalized_source_path) return NULL;
+    const char *best = NULL;
+    size_t best_len = 0;
+    for (uint32_t i = 0; i < aux_count; i++) {
+        const SatoriAuxiliaryFile *aux = &auxiliaries[i];
+        if (!aux->path || !aux->role || strcmp(aux->role, "manifest") != 0) continue;
+        const char *normalized_manifest = go_normalize_relative_path(arena, aux->path);
+        if (!normalized_manifest) return NULL;
+        const char *root = go_dirname(arena, normalized_manifest);
+        if (!root) return NULL;
+        if (!go_path_is_under_root(normalized_source_path, root)) continue;
+        size_t root_len = strlen(root);
+        if (!best || root_len > best_len) {
+            best = root;
             best_len = root_len;
         }
     }
@@ -953,7 +1067,7 @@ static int extract_ast_definitions(CBMArena *arena, CBMTypeRegistry *reg, Satori
             cbm_registry_add_func(reg, rf);
             int add_status = def_locs_add(def_locs, rf.qualified_name, file_path, file_path_len,
                                           ts_node_start_byte(child), ts_node_end_byte(child),
-                                          pkg_name, import_path);
+                                          pkg_name, import_path, SATORI_TARGET_FUNCTION);
             if (add_status != SATORI_SEMANTIC_OK) return add_status;
         } else if (strcmp(kind, "method_declaration") == 0) {
             TSNode name_node = ts_node_child_by_field_name(child, "name", 4);
@@ -990,7 +1104,7 @@ static int extract_ast_definitions(CBMArena *arena, CBMTypeRegistry *reg, Satori
                 cbm_registry_add_func(reg, rf);
                 int add_status = def_locs_add(def_locs, rf.qualified_name, file_path, file_path_len,
                                               ts_node_start_byte(child), ts_node_end_byte(child),
-                                              pkg_name, import_path);
+                                              pkg_name, import_path, SATORI_TARGET_METHOD);
                 if (add_status != SATORI_SEMANTIC_OK) return add_status;
             }
         } else if (strcmp(kind, "type_declaration") == 0) {
@@ -1013,12 +1127,1412 @@ static int extract_ast_definitions(CBMArena *arena, CBMTypeRegistry *reg, Satori
                 cbm_registry_add_type(reg, rt);
                 int add_status = def_locs_add(def_locs, rt.qualified_name, file_path, file_path_len,
                                               ts_node_start_byte(child), ts_node_end_byte(child),
-                                              pkg_name, import_path);
+                                              pkg_name, import_path, SATORI_TARGET_NONE);
                 if (add_status != SATORI_SEMANTIC_OK) return add_status;
             }
         }
     }
     return SATORI_SEMANTIC_OK;
+}
+
+typedef struct {
+    CBMLSPDef *items;
+    uint32_t count;
+    uint32_t cap;
+} SatoriLspDefArray;
+
+typedef struct {
+    const char *normalized_path;
+    const char *source_dir;
+    const char *package_name;
+    const char *module_qn;
+    const char *authority_root;
+    bool definitions_eligible;
+    bool calls_eligible;
+} SatoriJavaSourceMeta;
+
+static int lsp_defs_push(SatoriLspDefArray *defs, CBMLSPDef def) {
+    if (!defs) return SATORI_SEMANTIC_ERR_INVALID_ARGUMENT;
+    if (defs->count >= SATORI_MAX_DEFINITIONS) {
+        return SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
+    }
+    if (defs->count >= defs->cap) {
+        uint32_t new_cap = defs->cap == 0 ? 64 : defs->cap * 2;
+        if (new_cap > SATORI_MAX_DEFINITIONS) new_cap = SATORI_MAX_DEFINITIONS;
+        CBMLSPDef *items = (CBMLSPDef *)realloc(defs->items, (size_t)new_cap * sizeof(CBMLSPDef));
+        if (!items) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        defs->items = items;
+        defs->cap = new_cap;
+    }
+    defs->items[defs->count++] = def;
+    return SATORI_SEMANTIC_OK;
+}
+
+static int java_extract_package_name(CBMArena *arena, TSNode root, const char *source,
+                                     const char **out_package) {
+    if (out_package) *out_package = NULL;
+    if (!arena || ts_node_is_null(root) || !source || !out_package) {
+        return SATORI_SEMANTIC_ERR_INVALID_ARGUMENT;
+    }
+    uint32_t count = ts_node_named_child_count(root);
+    for (uint32_t i = 0; i < count; i++) {
+        TSNode child = ts_node_named_child(root, i);
+        if (ts_node_is_null(child) || strcmp(ts_node_type(child), "package_declaration") != 0) continue;
+        char *text = cbm_node_text(arena, child, source);
+        if (!text) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        const char *p = text;
+        if (strncmp(p, "package", 7) == 0) p += 7;
+        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+        const char *end = p;
+        while (*end && *end != ';' && *end != ' ' && *end != '\t' && *end != '\r' && *end != '\n') end++;
+        if (end > p) {
+            *out_package = cbm_arena_strndup(arena, p, (size_t)(end - p));
+            if (!*out_package) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        }
+        return SATORI_SEMANTIC_OK;
+    }
+    *out_package = "";
+    return SATORI_SEMANTIC_OK;
+}
+
+static bool java_is_type_declaration(const char *kind) {
+    return kind && (
+        strcmp(kind, "class_declaration") == 0 ||
+        strcmp(kind, "interface_declaration") == 0 ||
+        strcmp(kind, "enum_declaration") == 0 ||
+        strcmp(kind, "record_declaration") == 0 ||
+        strcmp(kind, "annotation_type_declaration") == 0
+    );
+}
+
+static const char *java_type_label(const char *kind) {
+    if (!kind) return "Type";
+    if (strcmp(kind, "interface_declaration") == 0 || strcmp(kind, "annotation_type_declaration") == 0) {
+        return "Interface";
+    }
+    if (strcmp(kind, "enum_declaration") == 0) return "Enum";
+    return "Class";
+}
+
+static const char **unknown_signature_params(CBMArena *arena, int count) {
+    if (!arena || count <= 0) return NULL;
+    const char **params = (const char **)cbm_arena_alloc(arena, (size_t)count * sizeof(const char *));
+    if (!params) return NULL;
+    for (int i = 0; i < count; i++) params[i] = "?";
+    return params;
+}
+
+static int java_extract_type_definitions(CBMArena *arena, SatoriLspDefArray *defs,
+                                         SatoriDefLocArray *def_locs, TSNode type_node,
+                                         const char *source, const char *owner_qn,
+                                         const char *module_qn, const char *package_name,
+                                         const char *authority_root,
+                                         const char *file_path, uint32_t file_path_len) {
+    if (!arena || !defs || !def_locs || ts_node_is_null(type_node) || !source || !module_qn || !file_path) {
+        return SATORI_SEMANTIC_ERR_INVALID_ARGUMENT;
+    }
+    const char *kind = ts_node_type(type_node);
+    if (!java_is_type_declaration(kind)) return SATORI_SEMANTIC_OK;
+
+    TSNode name_node = ts_node_child_by_field_name(type_node, "name", 4);
+    if (ts_node_is_null(name_node)) return SATORI_SEMANTIC_OK;
+    char *type_name = cbm_node_text(arena, name_node, source);
+    if (!type_name) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+    if (!type_name[0]) return SATORI_SEMANTIC_OK;
+
+    const char *type_qn = owner_qn && owner_qn[0]
+        ? cbm_arena_sprintf(arena, "%s.%s", owner_qn, type_name)
+        : (module_qn[0] ? cbm_arena_sprintf(arena, "%s.%s", module_qn, type_name)
+                        : cbm_arena_strdup(arena, type_name));
+    if (!type_qn) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+
+    CBMLSPDef type_def;
+    memset(&type_def, 0, sizeof(type_def));
+    type_def.qualified_name = type_qn;
+    type_def.short_name = type_name;
+    type_def.label = java_type_label(kind);
+    type_def.def_module_qn = module_qn;
+    type_def.is_interface = strcmp(type_def.label, "Interface") == 0;
+    type_def.lang = CBM_LANG_JAVA;
+    type_def.namespace_name = package_name;
+    int status = lsp_defs_push(defs, type_def);
+    if (status != SATORI_SEMANTIC_OK) return status;
+    status = def_locs_add_with_authority(def_locs, type_qn, file_path, file_path_len,
+                                         ts_node_start_byte(type_node), ts_node_end_byte(type_node),
+                                         module_qn, package_name && package_name[0] ? package_name : NULL,
+                                         SATORI_TARGET_NONE, authority_root);
+    if (status != SATORI_SEMANTIC_OK) return status;
+
+    TSNode body = ts_node_child_by_field_name(type_node, "body", 4);
+    if (ts_node_is_null(body)) return SATORI_SEMANTIC_OK;
+    uint32_t body_count = ts_node_named_child_count(body);
+    for (uint32_t i = 0; i < body_count; i++) {
+        TSNode member = ts_node_named_child(body, i);
+        if (ts_node_is_null(member)) continue;
+        const char *member_kind = ts_node_type(member);
+        if (java_is_type_declaration(member_kind)) {
+            status = java_extract_type_definitions(arena, defs, def_locs, member, source, type_qn,
+                                                   module_qn, package_name, authority_root,
+                                                   file_path, file_path_len);
+            if (status != SATORI_SEMANTIC_OK) return status;
+            continue;
+        }
+        bool is_method = strcmp(member_kind, "method_declaration") == 0;
+        bool is_constructor = strcmp(member_kind, "constructor_declaration") == 0;
+        if (!is_method && !is_constructor) continue;
+
+        TSNode member_name_node = ts_node_child_by_field_name(member, "name", 4);
+        if (ts_node_is_null(member_name_node)) continue;
+        char *member_name = cbm_node_text(arena, member_name_node, source);
+        if (!member_name) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        if (!member_name[0]) continue;
+        const char *member_qn = cbm_arena_sprintf(arena, "%s.%s", type_qn, member_name);
+        if (!member_qn) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+
+        TSNode params = ts_node_child_by_field_name(member, "parameters", 10);
+        int param_count = ts_node_is_null(params) ? 0 : (int)ts_node_named_child_count(params);
+        const char **signature_params = unknown_signature_params(arena, param_count);
+        if (param_count > 0 && !signature_params) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+
+        CBMLSPDef method_def;
+        memset(&method_def, 0, sizeof(method_def));
+        method_def.qualified_name = member_qn;
+        method_def.short_name = member_name;
+        method_def.label = is_constructor ? "Constructor" : "Method";
+        method_def.receiver_type = type_qn;
+        method_def.def_module_qn = module_qn;
+        method_def.signature_param_types = signature_params;
+        method_def.signature_param_count = param_count;
+        method_def.lang = CBM_LANG_JAVA;
+        method_def.namespace_name = package_name;
+        status = lsp_defs_push(defs, method_def);
+        if (status != SATORI_SEMANTIC_OK) return status;
+        status = def_locs_add_with_authority(def_locs, member_qn, file_path, file_path_len,
+                                             ts_node_start_byte(member), ts_node_end_byte(member),
+                                             module_qn, package_name && package_name[0] ? package_name : NULL,
+                                             SATORI_TARGET_METHOD, authority_root);
+        if (status != SATORI_SEMANTIC_OK) return status;
+    }
+    return SATORI_SEMANTIC_OK;
+}
+
+static int append_semantic_results(SatoriSession *s, const SatoriSourceFile *source,
+                                   const char *source_scope_qn,
+                                   const char *source_authority_root,
+                                   const CBMResolvedCallArray *resolved_calls,
+                                   const SatoriDefLocArray *def_locs) {
+    if (!s || !source || !resolved_calls || !def_locs) return SATORI_SEMANTIC_ERR_INVALID_ARGUMENT;
+    if (resolved_calls->count < 0 ||
+        (uint64_t)resolved_calls->count > SATORI_MAX_CALL_SITES) {
+        set_session_error(s, "Resource limit exceeded: max call sites exceeded");
+        return SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
+    }
+
+    uint32_t src_path_len = 0;
+    uint32_t src_path_off = 0;
+    if (!str_table_intern_checked(&s->str_table, source->path, source->path_len,
+                                  &src_path_off, &src_path_len)) {
+        set_session_error(s, "String table resource limit exceeded");
+        return SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
+    }
+
+    for (int r = 0; r < resolved_calls->count; r++) {
+        const CBMResolvedCall *rc = &resolved_calls->items[r];
+        if (rc->confidence <= 0.0f || !rc->callee_qn ||
+            (rc->strategy && strcmp(rc->strategy, "lsp_unresolved") == 0)) {
+            continue;
+        }
+        if (s->result_count >= SATORI_MAX_RESULTS) {
+            set_session_error(s, "Resource limit exceeded: max results exceeded");
+            return SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
+        }
+        if (s->result_count >= s->result_cap) {
+            uint32_t new_cap = s->result_cap == 0 ? 64 : s->result_cap * 2;
+            if (new_cap > SATORI_MAX_RESULTS) new_cap = SATORI_MAX_RESULTS;
+            SatoriSemanticResultV1 *items = (SatoriSemanticResultV1 *)realloc(
+                s->results, (size_t)new_cap * sizeof(SatoriSemanticResultV1));
+            if (!items) {
+                set_session_error(s, "Out of memory allocating results");
+                return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+            }
+            s->results = items;
+            s->result_cap = new_cap;
+        }
+
+        SatoriSemanticResultV1 *dst = &s->results[s->result_count++];
+        memset(dst, 0, sizeof(*dst));
+        dst->source_file_offset = src_path_off;
+        dst->source_file_length = src_path_len;
+        dst->call_start_byte = rc->site_start_byte;
+        dst->call_end_byte = rc->site_end_byte;
+        dst->strategy = map_strategy_for_language(s->language, rc->strategy);
+        dst->confidence = rc->confidence;
+
+        const SatoriDefLoc *target = NULL;
+        SatoriDefLookupState lookup = def_locs_find_unique(def_locs, rc->callee_qn, &target);
+        if (lookup == SATORI_DEF_LOOKUP_UNIQUE && target) {
+            if (source_authority_root &&
+                (!target->authority_root || strcmp(source_authority_root, target->authority_root) != 0)) {
+                dst->decision = (uint8_t)SATORI_DECISION_UNRESOLVED;
+                continue;
+            }
+            /* Raw C++ cross-file registry lookup does not by itself prove that a
+             * declaration is visible in this translation unit. Until include /
+             * build visibility is modeled, fail closed on cross-TU targets. */
+            if (strcmp(s->language, "cpp") == 0 && strcmp(target->file_path, source->path) != 0) {
+                dst->decision = (uint8_t)SATORI_DECISION_UNRESOLVED;
+                continue;
+            }
+            const char *target_name = strrchr(rc->callee_qn, '.');
+            target_name = target_name ? target_name + 1 : rc->callee_qn;
+            uint32_t target_name_len = (uint32_t)strlen(target_name);
+            if (!str_table_intern_checked(&s->str_table, target_name, target_name_len,
+                                          &dst->target_name_offset, &dst->target_name_length) ||
+                !str_table_intern_checked(&s->str_table, target->file_path, target->file_path_len,
+                                          &dst->target_file_offset, &dst->target_file_length)) {
+                set_session_error(s, "String table resource limit exceeded");
+                return SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
+            }
+            if (target->import_path && target->import_path[0] && source_scope_qn &&
+                strcmp(target->package_qn, source_scope_qn) != 0) {
+                uint32_t import_len = (uint32_t)strlen(target->import_path);
+                if (!str_table_intern_checked(&s->str_table, target->import_path, import_len,
+                                              &dst->import_path_offset, &dst->import_path_length)) {
+                    set_session_error(s, "String table resource limit exceeded");
+                    return SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
+                }
+            }
+            dst->target_start_byte = target->start_byte;
+            dst->target_end_byte = target->end_byte;
+            dst->target_kind = target->target_kind;
+            dst->decision = (uint8_t)SATORI_DECISION_RESOLVED;
+        } else if (lookup == SATORI_DEF_LOOKUP_AMBIGUOUS) {
+            dst->decision = (uint8_t)SATORI_DECISION_AMBIGUOUS;
+        } else {
+            dst->decision = (uint8_t)SATORI_DECISION_UNRESOLVED;
+        }
+    }
+    return SATORI_SEMANTIC_OK;
+}
+
+static int resolve_java_project(SatoriSession *s) {
+    int status = SATORI_SEMANTIC_OK;
+    TSParser *parser = NULL;
+    TSTree **trees = NULL;
+    SatoriJavaSourceMeta *meta = NULL;
+    SatoriLspDefArray defs;
+    SatoriDefLocArray def_locs;
+    memset(&defs, 0, sizeof(defs));
+    memset(&def_locs, 0, sizeof(def_locs));
+
+    parser = ts_parser_new();
+    if (!parser) {
+        set_session_error(s, "Failed to create Java Tree-sitter parser");
+        status = SATORI_SEMANTIC_ERR_PARSE_FAILED;
+        goto cleanup;
+    }
+    if (!ts_parser_set_language(parser, tree_sitter_java())) {
+        set_session_error(s, "Failed to configure Java Tree-sitter parser");
+        status = SATORI_SEMANTIC_ERR_PARSE_FAILED;
+        goto cleanup;
+    }
+
+    trees = (TSTree **)calloc(s->source_count, sizeof(TSTree *));
+    meta = (SatoriJavaSourceMeta *)calloc(s->source_count, sizeof(SatoriJavaSourceMeta));
+    if (!trees || !meta) {
+        set_session_error(s, "Out of memory allocating Java semantic project state");
+        status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        goto cleanup;
+    }
+
+    for (uint32_t i = 0; i < s->source_count; i++) {
+        const SatoriSourceFile *sf = &s->sources[i];
+        trees[i] = ts_parser_parse_string(parser, NULL, sf->source, sf->source_len);
+        if (!trees[i]) {
+            set_session_error(s, "Java Tree-sitter parser failed to parse source file");
+            status = SATORI_SEMANTIC_ERR_PARSE_FAILED;
+            goto cleanup;
+        }
+        TSNode root = ts_tree_root_node(trees[i]);
+        meta[i].normalized_path = go_normalize_relative_path(&s->arena, sf->path);
+        meta[i].source_dir = meta[i].normalized_path
+            ? go_dirname(&s->arena, meta[i].normalized_path)
+            : NULL;
+        if (!meta[i].normalized_path || !meta[i].source_dir) {
+            set_session_error(s, "Out of memory deriving Java source identity");
+            status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+            goto cleanup;
+        }
+        status = java_extract_package_name(&s->arena, root, sf->source, &meta[i].package_name);
+        if (status != SATORI_SEMANTIC_OK) {
+            set_session_error(s, "Failed to extract Java package identity");
+            goto cleanup;
+        }
+        meta[i].module_qn = meta[i].package_name && meta[i].package_name[0]
+            ? meta[i].package_name
+            : (meta[i].source_dir[0]
+                ? cbm_arena_sprintf(&s->arena, "@local/%s", meta[i].source_dir)
+                : "@local/.");
+        meta[i].authority_root = find_nearest_manifest_root(&s->arena, s->auxiliaries,
+                                                            s->aux_count, meta[i].normalized_path);
+        if (!meta[i].authority_root) meta[i].authority_root = meta[i].source_dir;
+        if (!meta[i].module_qn) {
+            set_session_error(s, "Out of memory deriving Java module identity");
+            status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+            goto cleanup;
+        }
+        meta[i].definitions_eligible = !ts_node_has_error(root);
+        meta[i].calls_eligible = meta[i].definitions_eligible;
+        if (!meta[i].definitions_eligible) continue;
+
+        uint32_t count = ts_node_named_child_count(root);
+        for (uint32_t j = 0; j < count; j++) {
+            TSNode child = ts_node_named_child(root, j);
+            if (!java_is_type_declaration(ts_node_type(child))) continue;
+            status = java_extract_type_definitions(&s->arena, &defs, &def_locs, child, sf->source,
+                                                   NULL, meta[i].module_qn, meta[i].package_name,
+                                                   meta[i].authority_root, sf->path, sf->path_len);
+            if (status != SATORI_SEMANTIC_OK) {
+                set_session_error(s, status == SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED
+                    ? "Resource limit exceeded while extracting Java definitions"
+                    : "Out of memory extracting Java definitions");
+                goto cleanup;
+            }
+        }
+    }
+
+    {
+        CBMTypeRegistry registry;
+        cbm_registry_init(&registry, &s->arena);
+        cbm_java_stdlib_register(&registry, &s->arena);
+        cbm_java_register_lsp_defs(&s->arena, &registry, defs.items, (int)defs.count);
+        cbm_registry_finalize(&registry);
+
+        uint64_t total_call_sites = 0;
+        for (uint32_t i = 0; i < s->source_count; i++) {
+            if (!meta[i].calls_eligible) continue;
+            CBMResolvedCallArray resolved;
+            memset(&resolved, 0, sizeof(resolved));
+            JavaLSPContext ctx;
+            java_lsp_init(&ctx, &s->arena, s->sources[i].source, (int)s->sources[i].source_len,
+                          &registry, meta[i].package_name, meta[i].module_qn, &resolved);
+            java_lsp_process_file(&ctx, ts_tree_root_node(trees[i]));
+            if (resolved.count < 0 ||
+                (uint64_t)resolved.count > SATORI_MAX_CALL_SITES - total_call_sites) {
+                set_session_error(s, "Resource limit exceeded: max Java call sites exceeded");
+                status = SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
+                goto cleanup;
+            }
+            total_call_sites += (uint64_t)resolved.count;
+            status = append_semantic_results(s, &s->sources[i], meta[i].module_qn,
+                                             meta[i].authority_root, &resolved, &def_locs);
+            if (status != SATORI_SEMANTIC_OK) goto cleanup;
+        }
+    }
+
+cleanup:
+    if (trees) {
+        for (uint32_t i = 0; i < s->source_count; i++) {
+            if (trees[i]) ts_tree_delete(trees[i]);
+        }
+    }
+    free(trees);
+    free(meta);
+    free(defs.items);
+    free(def_locs.items);
+    if (parser) ts_parser_delete(parser);
+    return status;
+}
+
+typedef struct {
+    const char *normalized_path;
+    const char *source_dir;
+    const char *module_qn;
+    const char *authority_root;
+    bool eligible;
+} SatoriCSharpSourceMeta;
+
+static bool csharp_is_type_declaration(const char *kind) {
+    return kind && (
+        strcmp(kind, "class_declaration") == 0 ||
+        strcmp(kind, "struct_declaration") == 0 ||
+        strcmp(kind, "interface_declaration") == 0 ||
+        strcmp(kind, "record_declaration") == 0 ||
+        strcmp(kind, "enum_declaration") == 0
+    );
+}
+
+static const char *csharp_type_label(const char *kind) {
+    if (!kind) return "Type";
+    if (strcmp(kind, "interface_declaration") == 0) return "Interface";
+    if (strcmp(kind, "struct_declaration") == 0) return "Struct";
+    if (strcmp(kind, "record_declaration") == 0) return "Record";
+    if (strcmp(kind, "enum_declaration") == 0) return "Enum";
+    return "Class";
+}
+
+static const char *join_dotted_scope(CBMArena *arena, const char *prefix, const char *name) {
+    if (!name || !name[0]) return prefix ? prefix : "";
+    if (!prefix || !prefix[0]) return cbm_arena_strdup(arena, name);
+    return cbm_arena_sprintf(arena, "%s.%s", prefix, name);
+}
+
+static int csharp_collect_definitions(CBMArena *arena, SatoriLspDefArray *defs,
+                                      SatoriDefLocArray *def_locs, TSNode node,
+                                      const char *source, const char *namespace_qn,
+                                      const char *owner_qn, const char *module_qn,
+                                      const char *authority_root,
+                                      const char *file_path, uint32_t file_path_len) {
+    if (!arena || !defs || !def_locs || ts_node_is_null(node) || !source || !module_qn || !file_path) {
+        return SATORI_SEMANTIC_ERR_INVALID_ARGUMENT;
+    }
+    const char *kind = ts_node_type(node);
+    if (strcmp(kind, "namespace_declaration") == 0 ||
+        strcmp(kind, "file_scoped_namespace_declaration") == 0) {
+        TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+        char *name = ts_node_is_null(name_node) ? NULL : cbm_node_text(arena, name_node, source);
+        if (!ts_node_is_null(name_node) && !name) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        const char *next_namespace = name && name[0]
+            ? join_dotted_scope(arena, namespace_qn, name)
+            : namespace_qn;
+        if (name && name[0] && !next_namespace) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        uint32_t count = ts_node_named_child_count(node);
+        for (uint32_t i = 0; i < count; i++) {
+            TSNode child = ts_node_named_child(node, i);
+            if (!ts_node_is_null(name_node) && ts_node_eq(child, name_node)) continue;
+            int status = csharp_collect_definitions(arena, defs, def_locs, child, source,
+                                                    next_namespace, owner_qn, module_qn,
+                                                    authority_root, file_path, file_path_len);
+            if (status != SATORI_SEMANTIC_OK) return status;
+        }
+        return SATORI_SEMANTIC_OK;
+    }
+
+    if (csharp_is_type_declaration(kind)) {
+        TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+        if (ts_node_is_null(name_node)) return SATORI_SEMANTIC_OK;
+        char *name = cbm_node_text(arena, name_node, source);
+        if (!name) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        if (!name[0]) return SATORI_SEMANTIC_OK;
+        const char *scope = owner_qn && owner_qn[0]
+            ? owner_qn
+            : (namespace_qn && namespace_qn[0] ? namespace_qn : module_qn);
+        const char *type_qn = join_dotted_scope(arena, scope, name);
+        if (!type_qn) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+
+        CBMLSPDef def;
+        memset(&def, 0, sizeof(def));
+        def.qualified_name = type_qn;
+        def.short_name = name;
+        def.label = csharp_type_label(kind);
+        def.def_module_qn = module_qn;
+        def.namespace_name = namespace_qn;
+        def.is_interface = strcmp(def.label, "Interface") == 0;
+        def.lang = CBM_LANG_CSHARP;
+        int status = lsp_defs_push(defs, def);
+        if (status != SATORI_SEMANTIC_OK) return status;
+        status = def_locs_add_with_authority(def_locs, type_qn, file_path, file_path_len,
+                                             ts_node_start_byte(node), ts_node_end_byte(node),
+                                             namespace_qn && namespace_qn[0] ? namespace_qn : module_qn,
+                                             NULL, SATORI_TARGET_NONE, authority_root);
+        if (status != SATORI_SEMANTIC_OK) return status;
+
+        TSNode body = ts_node_child_by_field_name(node, "body", 4);
+        if (!ts_node_is_null(body)) {
+            uint32_t count = ts_node_named_child_count(body);
+            for (uint32_t i = 0; i < count; i++) {
+                status = csharp_collect_definitions(arena, defs, def_locs,
+                                                    ts_node_named_child(body, i), source,
+                                                    namespace_qn, type_qn, module_qn,
+                                                    authority_root, file_path, file_path_len);
+                if (status != SATORI_SEMANTIC_OK) return status;
+            }
+        }
+        return SATORI_SEMANTIC_OK;
+    }
+
+    if (strcmp(kind, "method_declaration") == 0 && owner_qn && owner_qn[0]) {
+        TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+        if (ts_node_is_null(name_node)) return SATORI_SEMANTIC_OK;
+        char *name = cbm_node_text(arena, name_node, source);
+        if (!name) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        if (!name[0]) return SATORI_SEMANTIC_OK;
+        const char *method_qn = join_dotted_scope(arena, owner_qn, name);
+        if (!method_qn) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        TSNode params = ts_node_child_by_field_name(node, "parameters", 10);
+        int param_count = ts_node_is_null(params) ? 0 : (int)ts_node_named_child_count(params);
+        const char **signature_params = unknown_signature_params(arena, param_count);
+        if (param_count > 0 && !signature_params) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+
+        CBMLSPDef def;
+        memset(&def, 0, sizeof(def));
+        def.qualified_name = method_qn;
+        def.short_name = name;
+        def.label = "Method";
+        def.receiver_type = owner_qn;
+        def.def_module_qn = module_qn;
+        def.namespace_name = namespace_qn;
+        def.signature_param_types = signature_params;
+        def.signature_param_count = param_count;
+        def.lang = CBM_LANG_CSHARP;
+        int status = lsp_defs_push(defs, def);
+        if (status != SATORI_SEMANTIC_OK) return status;
+        return def_locs_add_with_authority(def_locs, method_qn, file_path, file_path_len,
+                                           ts_node_start_byte(node), ts_node_end_byte(node),
+                                           namespace_qn && namespace_qn[0] ? namespace_qn : module_qn,
+                                           NULL, SATORI_TARGET_METHOD, authority_root);
+    }
+
+    if (strcmp(kind, "method_declaration") == 0 ||
+        strcmp(kind, "local_function_statement") == 0 ||
+        strcmp(kind, "constructor_declaration") == 0) {
+        return SATORI_SEMANTIC_OK;
+    }
+
+    uint32_t count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < count; i++) {
+        int status = csharp_collect_definitions(arena, defs, def_locs,
+                                                ts_node_named_child(node, i), source,
+                                                namespace_qn, owner_qn, module_qn,
+                                                authority_root, file_path, file_path_len);
+        if (status != SATORI_SEMANTIC_OK) return status;
+    }
+    return SATORI_SEMANTIC_OK;
+}
+
+static int resolve_csharp_project(SatoriSession *s) {
+    int status = SATORI_SEMANTIC_OK;
+    TSParser *parser = NULL;
+    TSTree **trees = NULL;
+    SatoriCSharpSourceMeta *meta = NULL;
+    SatoriLspDefArray defs;
+    SatoriDefLocArray def_locs;
+    memset(&defs, 0, sizeof(defs));
+    memset(&def_locs, 0, sizeof(def_locs));
+
+    parser = ts_parser_new();
+    if (!parser || !ts_parser_set_language(parser, tree_sitter_c_sharp())) {
+        set_session_error(s, "Failed to configure C# Tree-sitter parser");
+        status = SATORI_SEMANTIC_ERR_PARSE_FAILED;
+        goto cleanup;
+    }
+    trees = (TSTree **)calloc(s->source_count, sizeof(TSTree *));
+    meta = (SatoriCSharpSourceMeta *)calloc(s->source_count, sizeof(SatoriCSharpSourceMeta));
+    if (!trees || !meta) {
+        set_session_error(s, "Out of memory allocating C# semantic project state");
+        status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        goto cleanup;
+    }
+
+    for (uint32_t i = 0; i < s->source_count; i++) {
+        const SatoriSourceFile *sf = &s->sources[i];
+        trees[i] = ts_parser_parse_string(parser, NULL, sf->source, sf->source_len);
+        if (!trees[i]) {
+            set_session_error(s, "C# Tree-sitter parser failed to parse source file");
+            status = SATORI_SEMANTIC_ERR_PARSE_FAILED;
+            goto cleanup;
+        }
+        meta[i].normalized_path = go_normalize_relative_path(&s->arena, sf->path);
+        meta[i].source_dir = meta[i].normalized_path ? go_dirname(&s->arena, meta[i].normalized_path) : NULL;
+        if (!meta[i].normalized_path || !meta[i].source_dir) {
+            set_session_error(s, "Out of memory deriving C# source identity");
+            status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+            goto cleanup;
+        }
+        meta[i].module_qn = meta[i].source_dir[0]
+            ? cbm_arena_sprintf(&s->arena, "@local/%s", meta[i].source_dir)
+            : "@local/.";
+        meta[i].authority_root = find_nearest_manifest_root(&s->arena, s->auxiliaries,
+                                                            s->aux_count, meta[i].normalized_path);
+        if (!meta[i].authority_root) meta[i].authority_root = meta[i].source_dir;
+        if (!meta[i].module_qn) {
+            set_session_error(s, "Out of memory deriving C# module identity");
+            status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+            goto cleanup;
+        }
+        TSNode root = ts_tree_root_node(trees[i]);
+        meta[i].eligible = !ts_node_has_error(root);
+        if (!meta[i].eligible) continue;
+        status = csharp_collect_definitions(&s->arena, &defs, &def_locs, root, sf->source,
+                                            "", NULL, meta[i].module_qn, meta[i].authority_root,
+                                            sf->path, sf->path_len);
+        if (status != SATORI_SEMANTIC_OK) {
+            set_session_error(s, status == SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED
+                ? "Resource limit exceeded while extracting C# definitions"
+                : "Out of memory extracting C# definitions");
+            goto cleanup;
+        }
+    }
+
+    {
+        CBMTypeRegistry *registry = cbm_cs_build_cross_registry(&s->arena, defs.items, (int)defs.count);
+        if (!registry) {
+            set_session_error(s, "Out of memory building C# semantic registry");
+            status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+            goto cleanup;
+        }
+        uint64_t total_call_sites = 0;
+        for (uint32_t i = 0; i < s->source_count; i++) {
+            if (!meta[i].eligible) continue;
+            CBMResolvedCallArray resolved;
+            memset(&resolved, 0, sizeof(resolved));
+            cbm_run_cs_lsp_cross_with_registry(&s->arena, s->sources[i].source,
+                                               (int)s->sources[i].source_len,
+                                               meta[i].module_qn, registry,
+                                               NULL, 0, trees[i], &resolved);
+            if (resolved.count < 0 ||
+                (uint64_t)resolved.count > SATORI_MAX_CALL_SITES - total_call_sites) {
+                set_session_error(s, "Resource limit exceeded: max C# call sites exceeded");
+                status = SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
+                goto cleanup;
+            }
+            total_call_sites += (uint64_t)resolved.count;
+            status = append_semantic_results(s, &s->sources[i], meta[i].module_qn,
+                                             meta[i].authority_root, &resolved, &def_locs);
+            if (status != SATORI_SEMANTIC_OK) goto cleanup;
+        }
+    }
+
+cleanup:
+    if (trees) {
+        for (uint32_t i = 0; i < s->source_count; i++) {
+            if (trees[i]) ts_tree_delete(trees[i]);
+        }
+    }
+    free(trees);
+    free(meta);
+    free(defs.items);
+    free(def_locs.items);
+    if (parser) ts_parser_delete(parser);
+    return status;
+}
+
+typedef struct {
+    bool eligible;
+} SatoriCppSourceMeta;
+
+static bool cpp_is_class_declaration(const char *kind) {
+    return kind && (
+        strcmp(kind, "class_specifier") == 0 ||
+        strcmp(kind, "struct_specifier") == 0 ||
+        strcmp(kind, "union_specifier") == 0
+    );
+}
+
+static const char *cpp_join_scope(CBMArena *arena, const char *prefix, const char *name) {
+    if (!name || !name[0]) return prefix ? prefix : "";
+    if (!prefix || !prefix[0]) return cbm_arena_strdup(arena, name);
+    return cbm_arena_sprintf(arena, "%s.%s", prefix, name);
+}
+
+static const char *cpp_normalize_scope_text(CBMArena *arena, const char *text) {
+    if (!arena || !text) return NULL;
+    size_t len = strlen(text);
+    char *out = (char *)cbm_arena_alloc(arena, len + 1);
+    if (!out) return NULL;
+    size_t w = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (text[i] == ':' && i + 1 < len && text[i + 1] == ':') {
+            out[w++] = '.';
+            i++;
+        } else if (text[i] != ' ' && text[i] != '\t' && text[i] != '\r' && text[i] != '\n') {
+            out[w++] = text[i];
+        }
+    }
+    out[w] = '\0';
+    return out;
+}
+
+static TSNode cpp_find_callable_terminal(TSNode node) {
+    if (ts_node_is_null(node)) return node;
+    const char *kind = ts_node_type(node);
+    if (strcmp(kind, "identifier") == 0 || strcmp(kind, "field_identifier") == 0 ||
+        strcmp(kind, "qualified_identifier") == 0 || strcmp(kind, "operator_name") == 0 ||
+        strcmp(kind, "destructor_name") == 0) {
+        return node;
+    }
+    TSNode declarator = ts_node_child_by_field_name(node, "declarator", 10);
+    if (!ts_node_is_null(declarator)) {
+        TSNode found = cpp_find_callable_terminal(declarator);
+        if (!ts_node_is_null(found)) return found;
+    }
+    uint32_t count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < count; i++) {
+        TSNode found = cpp_find_callable_terminal(ts_node_named_child(node, i));
+        if (!ts_node_is_null(found)) return found;
+    }
+    TSNode null_node = {0};
+    return null_node;
+}
+
+static int cpp_function_param_count(TSNode node) {
+    if (ts_node_is_null(node)) return 0;
+    TSNode params = ts_node_child_by_field_name(node, "parameters", 10);
+    if (!ts_node_is_null(params)) return (int)ts_node_named_child_count(params);
+    TSNode declarator = ts_node_child_by_field_name(node, "declarator", 10);
+    if (!ts_node_is_null(declarator)) return cpp_function_param_count(declarator);
+    uint32_t count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < count; i++) {
+        TSNode child = ts_node_named_child(node, i);
+        if (strcmp(ts_node_type(child), "function_declarator") == 0) {
+            return cpp_function_param_count(child);
+        }
+    }
+    return 0;
+}
+
+static int cpp_collect_definitions(CBMArena *arena, SatoriLspDefArray *defs,
+                                   SatoriDefLocArray *def_locs, TSNode node,
+                                   const char *source, const char *namespace_qn,
+                                   const char *owner_qn, const char *file_path,
+                                   uint32_t file_path_len) {
+    if (!arena || !defs || !def_locs || ts_node_is_null(node) || !source || !file_path) {
+        return SATORI_SEMANTIC_ERR_INVALID_ARGUMENT;
+    }
+    const char *kind = ts_node_type(node);
+    if (strcmp(kind, "namespace_definition") == 0) {
+        TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+        char *name_text = ts_node_is_null(name_node) ? NULL : cbm_node_text(arena, name_node, source);
+        if (!ts_node_is_null(name_node) && !name_text) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        const char *normalized = name_text ? cpp_normalize_scope_text(arena, name_text) : NULL;
+        if (name_text && !normalized) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        const char *next_namespace = normalized && normalized[0]
+            ? cpp_join_scope(arena, namespace_qn, normalized)
+            : namespace_qn;
+        if (normalized && normalized[0] && !next_namespace) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        TSNode body = ts_node_child_by_field_name(node, "body", 4);
+        if (!ts_node_is_null(body)) {
+            uint32_t count = ts_node_named_child_count(body);
+            for (uint32_t i = 0; i < count; i++) {
+                int status = cpp_collect_definitions(arena, defs, def_locs,
+                                                     ts_node_named_child(body, i), source,
+                                                     next_namespace, owner_qn,
+                                                     file_path, file_path_len);
+                if (status != SATORI_SEMANTIC_OK) return status;
+            }
+        }
+        return SATORI_SEMANTIC_OK;
+    }
+
+    if (cpp_is_class_declaration(kind)) {
+        TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+        if (ts_node_is_null(name_node)) return SATORI_SEMANTIC_OK;
+        char *name = cbm_node_text(arena, name_node, source);
+        if (!name) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        if (!name[0]) return SATORI_SEMANTIC_OK;
+        const char *scope = owner_qn && owner_qn[0] ? owner_qn : namespace_qn;
+        const char *type_qn = cpp_join_scope(arena, scope, name);
+        if (!type_qn) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        CBMLSPDef def;
+        memset(&def, 0, sizeof(def));
+        def.qualified_name = type_qn;
+        def.short_name = name;
+        def.label = "Class";
+        def.def_module_qn = namespace_qn;
+        def.lang = CBM_LANG_CPP;
+        int status = lsp_defs_push(defs, def);
+        if (status != SATORI_SEMANTIC_OK) return status;
+        status = def_locs_add(def_locs, type_qn, file_path, file_path_len,
+                              ts_node_start_byte(node), ts_node_end_byte(node),
+                              namespace_qn ? namespace_qn : "", NULL, SATORI_TARGET_NONE);
+        if (status != SATORI_SEMANTIC_OK) return status;
+        TSNode body = ts_node_child_by_field_name(node, "body", 4);
+        if (!ts_node_is_null(body)) {
+            uint32_t count = ts_node_named_child_count(body);
+            for (uint32_t i = 0; i < count; i++) {
+                status = cpp_collect_definitions(arena, defs, def_locs,
+                                                 ts_node_named_child(body, i), source,
+                                                 namespace_qn, type_qn,
+                                                 file_path, file_path_len);
+                if (status != SATORI_SEMANTIC_OK) return status;
+            }
+        }
+        return SATORI_SEMANTIC_OK;
+    }
+
+    if (strcmp(kind, "function_definition") == 0) {
+        TSNode declarator = ts_node_child_by_field_name(node, "declarator", 10);
+        TSNode terminal = cpp_find_callable_terminal(declarator);
+        if (ts_node_is_null(terminal)) return SATORI_SEMANTIC_OK;
+        char *raw_name = cbm_node_text(arena, terminal, source);
+        if (!raw_name) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        const char *normalized = cpp_normalize_scope_text(arena, raw_name);
+        if (!normalized) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        const char *leaf = strrchr(normalized, '.');
+        leaf = leaf ? leaf + 1 : normalized;
+        if (!leaf[0]) return SATORI_SEMANTIC_OK;
+
+        const char *qualified_name = NULL;
+        const char *receiver_type = NULL;
+        const char *terminal_kind = ts_node_type(terminal);
+        if (strcmp(terminal_kind, "qualified_identifier") == 0 && strchr(normalized, '.')) {
+            qualified_name = normalized;
+            const char *last_dot = strrchr(normalized, '.');
+            if (last_dot) receiver_type = cbm_arena_strndup(arena, normalized, (size_t)(last_dot - normalized));
+        } else if (owner_qn && owner_qn[0]) {
+            receiver_type = owner_qn;
+            qualified_name = cpp_join_scope(arena, owner_qn, leaf);
+        } else {
+            qualified_name = cpp_join_scope(arena, namespace_qn, leaf);
+        }
+        if (!qualified_name || (receiver_type && !receiver_type[0])) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+
+        int param_count = cpp_function_param_count(declarator);
+        const char **signature_params = unknown_signature_params(arena, param_count);
+        if (param_count > 0 && !signature_params) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        CBMLSPDef def;
+        memset(&def, 0, sizeof(def));
+        def.qualified_name = qualified_name;
+        def.short_name = leaf;
+        def.label = receiver_type ? "Method" : "Function";
+        def.receiver_type = receiver_type;
+        def.def_module_qn = namespace_qn;
+        def.signature_param_types = signature_params;
+        def.signature_param_count = param_count;
+        def.lang = CBM_LANG_CPP;
+        int status = lsp_defs_push(defs, def);
+        if (status != SATORI_SEMANTIC_OK) return status;
+        return def_locs_add(def_locs, qualified_name, file_path, file_path_len,
+                            ts_node_start_byte(node), ts_node_end_byte(node),
+                            namespace_qn ? namespace_qn : "", NULL,
+                            receiver_type ? SATORI_TARGET_METHOD : SATORI_TARGET_FUNCTION);
+    }
+
+    uint32_t count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < count; i++) {
+        int status = cpp_collect_definitions(arena, defs, def_locs,
+                                             ts_node_named_child(node, i), source,
+                                             namespace_qn, owner_qn, file_path, file_path_len);
+        if (status != SATORI_SEMANTIC_OK) return status;
+    }
+    return SATORI_SEMANTIC_OK;
+}
+
+static bool cpp_source_has_conditional_preprocessor(const char *source) {
+    if (!source) return false;
+    const char *p = source;
+    while (*p) {
+        const char *line = p;
+        while (*p && *p != '\n') p++;
+        const char *q = line;
+        while (q < p && (*q == ' ' || *q == '\t')) q++;
+        if (q < p && *q == '#') {
+            q++;
+            while (q < p && (*q == ' ' || *q == '\t')) q++;
+            if ((size_t)(p - q) >= 2 && strncmp(q, "if", 2) == 0 &&
+                ((q + 2 == p) || q[2] == ' ' || q[2] == '\t' || q[2] == 'd' || q[2] == 'n')) {
+                return true;
+            }
+            if ((size_t)(p - q) >= 4 && strncmp(q, "elif", 4) == 0) return true;
+        }
+        if (*p == '\n') p++;
+    }
+    return false;
+}
+
+static int resolve_cpp_project(SatoriSession *s) {
+    int status = SATORI_SEMANTIC_OK;
+    TSParser *parser = NULL;
+    TSTree **trees = NULL;
+    SatoriCppSourceMeta *meta = NULL;
+    SatoriLspDefArray defs;
+    SatoriDefLocArray def_locs;
+    memset(&defs, 0, sizeof(defs));
+    memset(&def_locs, 0, sizeof(def_locs));
+
+    parser = ts_parser_new();
+    if (!parser || !ts_parser_set_language(parser, tree_sitter_cpp())) {
+        set_session_error(s, "Failed to configure C++ Tree-sitter parser");
+        status = SATORI_SEMANTIC_ERR_PARSE_FAILED;
+        goto cleanup;
+    }
+    trees = (TSTree **)calloc(s->source_count, sizeof(TSTree *));
+    meta = (SatoriCppSourceMeta *)calloc(s->source_count, sizeof(SatoriCppSourceMeta));
+    if (!trees || !meta) {
+        set_session_error(s, "Out of memory allocating C++ semantic project state");
+        status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        goto cleanup;
+    }
+
+    for (uint32_t i = 0; i < s->source_count; i++) {
+        const SatoriSourceFile *sf = &s->sources[i];
+        trees[i] = ts_parser_parse_string(parser, NULL, sf->source, sf->source_len);
+        if (!trees[i]) {
+            set_session_error(s, "C++ Tree-sitter parser failed to parse source file");
+            status = SATORI_SEMANTIC_ERR_PARSE_FAILED;
+            goto cleanup;
+        }
+        TSNode root = ts_tree_root_node(trees[i]);
+        meta[i].eligible = !ts_node_has_error(root) && !cpp_source_has_conditional_preprocessor(sf->source);
+        if (!meta[i].eligible) continue;
+        status = cpp_collect_definitions(&s->arena, &defs, &def_locs, root, sf->source,
+                                         "", NULL, sf->path, sf->path_len);
+        if (status != SATORI_SEMANTIC_OK) {
+            set_session_error(s, status == SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED
+                ? "Resource limit exceeded while extracting C++ definitions"
+                : "Out of memory extracting C++ definitions");
+            goto cleanup;
+        }
+    }
+
+    {
+        CBMTypeRegistry *registry = cbm_c_build_cross_registry(&s->arena, defs.items, (int)defs.count);
+        if (!registry) {
+            set_session_error(s, "Out of memory building C++ semantic registry");
+            status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+            goto cleanup;
+        }
+        uint64_t total_call_sites = 0;
+        for (uint32_t i = 0; i < s->source_count; i++) {
+            if (!meta[i].eligible) continue;
+            CBMResolvedCallArray resolved;
+            memset(&resolved, 0, sizeof(resolved));
+            cbm_run_c_lsp_cross_with_registry(&s->arena, s->sources[i].source,
+                                              (int)s->sources[i].source_len,
+                                              "", true, registry, NULL, NULL, 0,
+                                              trees[i], &resolved);
+            if (resolved.count < 0 ||
+                (uint64_t)resolved.count > SATORI_MAX_CALL_SITES - total_call_sites) {
+                set_session_error(s, "Resource limit exceeded: max C++ call sites exceeded");
+                status = SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
+                goto cleanup;
+            }
+            total_call_sites += (uint64_t)resolved.count;
+            status = append_semantic_results(s, &s->sources[i], "", NULL, &resolved, &def_locs);
+            if (status != SATORI_SEMANTIC_OK) goto cleanup;
+        }
+    }
+
+cleanup:
+    if (trees) {
+        for (uint32_t i = 0; i < s->source_count; i++) {
+            if (trees[i]) ts_tree_delete(trees[i]);
+        }
+    }
+    free(trees);
+    free(meta);
+    free(defs.items);
+    free(def_locs.items);
+    if (parser) ts_parser_delete(parser);
+    return status;
+}
+
+typedef struct {
+    const char *root;
+    const char *crate_name;
+    CBMCargoManifest manifest;
+} SatoriRustCrate;
+
+typedef struct {
+    SatoriRustCrate *items;
+    uint32_t count;
+} SatoriRustCrateTable;
+
+typedef struct {
+    const SatoriRustCrate *crate;
+    const char *module_qn;
+    bool eligible;
+} SatoriRustSourceMeta;
+
+static const char *rust_normalize_crate_name(CBMArena *arena, const char *name) {
+    if (!arena || !name || !name[0]) return NULL;
+    size_t len = strlen(name);
+    char *out = (char *)cbm_arena_alloc(arena, len + 1);
+    if (!out) return NULL;
+    for (size_t i = 0; i < len; i++) out[i] = name[i] == '-' ? '_' : name[i];
+    out[len] = '\0';
+    return out;
+}
+
+static int rust_build_crate_table(CBMArena *arena, const SatoriAuxiliaryFile *auxiliaries,
+                                  uint32_t aux_count, SatoriRustCrateTable *out) {
+    if (!arena || !out) return SATORI_SEMANTIC_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+    if (!auxiliaries || aux_count == 0) return SATORI_SEMANTIC_OK;
+    out->items = (SatoriRustCrate *)calloc(aux_count, sizeof(SatoriRustCrate));
+    if (!out->items) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+    for (uint32_t i = 0; i < aux_count; i++) {
+        const SatoriAuxiliaryFile *aux = &auxiliaries[i];
+        if (!aux->path || !aux->source || !aux->role || strcmp(aux->role, "manifest") != 0) continue;
+        const char *base = strrchr(aux->path, '/');
+        base = base ? base + 1 : aux->path;
+        if (strcmp(base, "Cargo.toml") != 0) continue;
+        const char *normalized_path = go_normalize_relative_path(arena, aux->path);
+        if (!normalized_path) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        const char *root = go_dirname(arena, normalized_path);
+        if (!root) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        CBMCargoManifest manifest;
+        memset(&manifest, 0, sizeof(manifest));
+        cbm_cargo_parse(arena, aux->source, (int)aux->source_len, &manifest);
+        if (!manifest.package_name || !manifest.package_name[0]) continue;
+        const char *crate_name = rust_normalize_crate_name(arena, manifest.package_name);
+        if (!crate_name) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        for (uint32_t j = 0; j < out->count; j++) {
+            if (strcmp(out->items[j].root, root) != 0) continue;
+            if (strcmp(out->items[j].crate_name, crate_name) != 0) {
+                return SATORI_SEMANTIC_ERR_RESOLVE_FAILED;
+            }
+            crate_name = NULL;
+            break;
+        }
+        if (!crate_name) continue;
+        out->items[out->count].root = root;
+        out->items[out->count].crate_name = crate_name;
+        out->items[out->count].manifest = manifest;
+        out->count++;
+    }
+    return SATORI_SEMANTIC_OK;
+}
+
+static const SatoriRustCrate *rust_find_nearest_crate(const SatoriRustCrateTable *crates,
+                                                       const char *source_path) {
+    if (!crates || !source_path) return NULL;
+    const SatoriRustCrate *best = NULL;
+    size_t best_len = 0;
+    for (uint32_t i = 0; i < crates->count; i++) {
+        const SatoriRustCrate *candidate = &crates->items[i];
+        if (!go_path_is_under_root(source_path, candidate->root)) continue;
+        size_t root_len = strlen(candidate->root);
+        if (!best || root_len > best_len) {
+            best = candidate;
+            best_len = root_len;
+        }
+    }
+    return best;
+}
+
+static const char *rust_source_module_qn(CBMArena *arena, const SatoriRustCrate *crate,
+                                         const char *normalized_path) {
+    if (!arena || !crate || !normalized_path) return NULL;
+    const char *relative = normalized_path;
+    if (crate->root[0]) {
+        size_t root_len = strlen(crate->root);
+        if (strncmp(normalized_path, crate->root, root_len) != 0 || normalized_path[root_len] != '/') {
+            return NULL;
+        }
+        relative = normalized_path + root_len + 1;
+    }
+    const char *crate_root = cbm_arena_sprintf(arena, "@rust.%s", crate->crate_name);
+    if (!crate_root) return NULL;
+
+    const char *prefix = NULL;
+    if (strncmp(relative, "src/", 4) == 0) {
+        relative += 4;
+        prefix = crate_root;
+    } else if (strncmp(relative, "tests/", 6) == 0) {
+        relative += 6;
+        prefix = cbm_arena_sprintf(arena, "%s.tests", crate_root);
+        if (!prefix) return NULL;
+    } else {
+        return NULL;
+    }
+
+    size_t len = strlen(relative);
+    if (len < 3 || strcmp(relative + len - 3, ".rs") != 0) return NULL;
+    char *module = cbm_arena_strndup(arena, relative, len - 3);
+    if (!module) return NULL;
+    if (prefix == crate_root && (strcmp(module, "lib") == 0 || strcmp(module, "main") == 0)) {
+        return crate_root;
+    }
+    size_t module_len = strlen(module);
+    if (module_len >= 4 && strcmp(module + module_len - 4, "/mod") == 0) {
+        module[module_len - 4] = '\0';
+    }
+    for (char *p = module; *p; p++) if (*p == '/') *p = '.';
+    return module[0] ? cbm_arena_sprintf(arena, "%s.%s", prefix, module) : prefix;
+}
+
+static const char *rust_normalize_path(CBMArena *arena, const char *text) {
+    if (!arena || !text) return NULL;
+    size_t len = strlen(text);
+    char *out = (char *)cbm_arena_alloc(arena, len + 1);
+    if (!out) return NULL;
+    size_t w = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (text[i] == ':' && i + 1 < len && text[i + 1] == ':') {
+            out[w++] = '.';
+            i++;
+        } else if (text[i] != ' ' && text[i] != '\t' && text[i] != '\r' && text[i] != '\n' && text[i] != '&') {
+            out[w++] = text[i];
+        }
+    }
+    out[w] = '\0';
+    return out;
+}
+
+static bool rust_is_type_item(const char *kind) {
+    return kind && (
+        strcmp(kind, "struct_item") == 0 || strcmp(kind, "enum_item") == 0 ||
+        strcmp(kind, "trait_item") == 0 || strcmp(kind, "union_item") == 0 ||
+        strcmp(kind, "type_item") == 0
+    );
+}
+
+static const char *rust_type_label(const char *kind) {
+    if (!kind) return "Type";
+    if (strcmp(kind, "struct_item") == 0 || strcmp(kind, "union_item") == 0) return "Struct";
+    if (strcmp(kind, "enum_item") == 0) return "Enum";
+    if (strcmp(kind, "trait_item") == 0) return "Trait";
+    return "Type";
+}
+
+static int rust_collect_definitions(CBMArena *arena, SatoriLspDefArray *defs,
+                                    SatoriDefLocArray *def_locs, TSNode node,
+                                    const char *source, const char *module_qn,
+                                    const char *owner_qn, const char *trait_qn,
+                                    const char *file_path, uint32_t file_path_len) {
+    if (!arena || !defs || !def_locs || ts_node_is_null(node) || !source || !module_qn || !file_path) {
+        return SATORI_SEMANTIC_ERR_INVALID_ARGUMENT;
+    }
+    const char *kind = ts_node_type(node);
+    if (strcmp(kind, "mod_item") == 0) {
+        TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+        TSNode body = ts_node_child_by_field_name(node, "body", 4);
+        if (ts_node_is_null(name_node) || ts_node_is_null(body)) return SATORI_SEMANTIC_OK;
+        char *name = cbm_node_text(arena, name_node, source);
+        if (!name) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        const char *next_module = cpp_join_scope(arena, module_qn, name);
+        if (!next_module) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        uint32_t count = ts_node_named_child_count(body);
+        for (uint32_t i = 0; i < count; i++) {
+            int status = rust_collect_definitions(arena, defs, def_locs,
+                                                  ts_node_named_child(body, i), source,
+                                                  next_module, NULL, NULL,
+                                                  file_path, file_path_len);
+            if (status != SATORI_SEMANTIC_OK) return status;
+        }
+        return SATORI_SEMANTIC_OK;
+    }
+
+    if (strcmp(kind, "impl_item") == 0) {
+        TSNode type_node = ts_node_child_by_field_name(node, "type", 4);
+        TSNode impl_trait_node = ts_node_child_by_field_name(node, "trait", 5);
+        TSNode body = ts_node_child_by_field_name(node, "body", 4);
+        if (ts_node_is_null(type_node) || ts_node_is_null(body)) return SATORI_SEMANTIC_OK;
+        char *raw_type = cbm_node_text(arena, type_node, source);
+        if (!raw_type) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        const char *normalized_type = rust_normalize_path(arena, raw_type);
+        if (!normalized_type) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        const char *receiver = strchr(normalized_type, '.')
+            ? normalized_type
+            : cpp_join_scope(arena, module_qn, normalized_type);
+        if (!receiver) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        const char *impl_trait = NULL;
+        if (!ts_node_is_null(impl_trait_node)) {
+            char *raw_trait = cbm_node_text(arena, impl_trait_node, source);
+            if (!raw_trait) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+            const char *normalized_trait = rust_normalize_path(arena, raw_trait);
+            if (!normalized_trait) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+            impl_trait = strchr(normalized_trait, '.')
+                ? normalized_trait
+                : cpp_join_scope(arena, module_qn, normalized_trait);
+            if (!impl_trait) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        }
+        uint32_t count = ts_node_named_child_count(body);
+        for (uint32_t i = 0; i < count; i++) {
+            int status = rust_collect_definitions(arena, defs, def_locs,
+                                                  ts_node_named_child(body, i), source,
+                                                  module_qn, receiver, impl_trait,
+                                                  file_path, file_path_len);
+            if (status != SATORI_SEMANTIC_OK) return status;
+        }
+        return SATORI_SEMANTIC_OK;
+    }
+
+    if (rust_is_type_item(kind)) {
+        TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+        if (ts_node_is_null(name_node)) return SATORI_SEMANTIC_OK;
+        char *name = cbm_node_text(arena, name_node, source);
+        if (!name) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        const char *type_qn = cpp_join_scope(arena, module_qn, name);
+        if (!type_qn) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        CBMLSPDef def;
+        memset(&def, 0, sizeof(def));
+        def.qualified_name = type_qn;
+        def.short_name = name;
+        def.label = rust_type_label(kind);
+        def.def_module_qn = module_qn;
+        def.is_interface = strcmp(def.label, "Trait") == 0;
+        def.lang = CBM_LANG_RUST;
+        int status = lsp_defs_push(defs, def);
+        if (status != SATORI_SEMANTIC_OK) return status;
+        status = def_locs_add(def_locs, type_qn, file_path, file_path_len,
+                              ts_node_start_byte(node), ts_node_end_byte(node),
+                              module_qn, NULL, SATORI_TARGET_NONE);
+        if (status != SATORI_SEMANTIC_OK) return status;
+        if (strcmp(kind, "trait_item") == 0) {
+            TSNode body = ts_node_child_by_field_name(node, "body", 4);
+            if (!ts_node_is_null(body)) {
+                uint32_t count = ts_node_named_child_count(body);
+                for (uint32_t i = 0; i < count; i++) {
+                    status = rust_collect_definitions(arena, defs, def_locs,
+                                                      ts_node_named_child(body, i), source,
+                                                      module_qn, type_qn, type_qn,
+                                                      file_path, file_path_len);
+                    if (status != SATORI_SEMANTIC_OK) return status;
+                }
+            }
+        }
+        return SATORI_SEMANTIC_OK;
+    }
+
+    if (strcmp(kind, "function_item") == 0 || strcmp(kind, "function_signature_item") == 0) {
+        TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+        if (ts_node_is_null(name_node)) return SATORI_SEMANTIC_OK;
+        char *name = cbm_node_text(arena, name_node, source);
+        if (!name) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        const char *scope = owner_qn && owner_qn[0] ? owner_qn : module_qn;
+        const char *function_qn = cpp_join_scope(arena, scope, name);
+        if (!function_qn) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        TSNode params = ts_node_child_by_field_name(node, "parameters", 10);
+        int param_count = ts_node_is_null(params) ? 0 : (int)ts_node_named_child_count(params);
+        const char **signature_params = unknown_signature_params(arena, param_count);
+        if (param_count > 0 && !signature_params) return SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        CBMLSPDef def;
+        memset(&def, 0, sizeof(def));
+        def.qualified_name = function_qn;
+        def.short_name = name;
+        def.label = owner_qn && owner_qn[0] ? "Method" : "Function";
+        def.receiver_type = owner_qn;
+        def.def_module_qn = module_qn;
+        def.signature_param_types = signature_params;
+        def.signature_param_count = param_count;
+        def.trait_qn = trait_qn;
+        def.is_abstract = strcmp(kind, "function_signature_item") == 0;
+        def.lang = CBM_LANG_RUST;
+        int status = lsp_defs_push(defs, def);
+        if (status != SATORI_SEMANTIC_OK) return status;
+        return def_locs_add(def_locs, function_qn, file_path, file_path_len,
+                            ts_node_start_byte(node), ts_node_end_byte(node),
+                            module_qn, NULL,
+                            owner_qn && owner_qn[0] ? SATORI_TARGET_METHOD : SATORI_TARGET_FUNCTION);
+    }
+
+    uint32_t count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < count; i++) {
+        int status = rust_collect_definitions(arena, defs, def_locs,
+                                              ts_node_named_child(node, i), source,
+                                              module_qn, owner_qn, trait_qn,
+                                              file_path, file_path_len);
+        if (status != SATORI_SEMANTIC_OK) return status;
+    }
+    return SATORI_SEMANTIC_OK;
+}
+
+static bool rust_source_has_unmodeled_cfg(const char *source) {
+    return source && (strstr(source, "#[cfg") || strstr(source, "#[cfg_attr"));
+}
+
+static int resolve_rust_project(SatoriSession *s) {
+    int status = SATORI_SEMANTIC_OK;
+    TSParser *parser = NULL;
+    TSTree **trees = NULL;
+    SatoriRustSourceMeta *meta = NULL;
+    SatoriRustCrateTable crates;
+    SatoriLspDefArray defs;
+    SatoriDefLocArray def_locs;
+    memset(&crates, 0, sizeof(crates));
+    memset(&defs, 0, sizeof(defs));
+    memset(&def_locs, 0, sizeof(def_locs));
+
+    status = rust_build_crate_table(&s->arena, s->auxiliaries, s->aux_count, &crates);
+    if (status != SATORI_SEMANTIC_OK) {
+        set_session_error(s, status == SATORI_SEMANTIC_ERR_OUT_OF_MEMORY
+            ? "Out of memory building Rust Cargo ownership table"
+            : "Conflicting Rust Cargo package ownership");
+        goto cleanup;
+    }
+    parser = ts_parser_new();
+    if (!parser || !ts_parser_set_language(parser, tree_sitter_rust())) {
+        set_session_error(s, "Failed to configure Rust Tree-sitter parser");
+        status = SATORI_SEMANTIC_ERR_PARSE_FAILED;
+        goto cleanup;
+    }
+    trees = (TSTree **)calloc(s->source_count, sizeof(TSTree *));
+    meta = (SatoriRustSourceMeta *)calloc(s->source_count, sizeof(SatoriRustSourceMeta));
+    if (!trees || !meta) {
+        set_session_error(s, "Out of memory allocating Rust semantic project state");
+        status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+        goto cleanup;
+    }
+
+    for (uint32_t i = 0; i < s->source_count; i++) {
+        const SatoriSourceFile *sf = &s->sources[i];
+        trees[i] = ts_parser_parse_string(parser, NULL, sf->source, sf->source_len);
+        if (!trees[i]) {
+            set_session_error(s, "Rust Tree-sitter parser failed to parse source file");
+            status = SATORI_SEMANTIC_ERR_PARSE_FAILED;
+            goto cleanup;
+        }
+        const char *normalized_path = go_normalize_relative_path(&s->arena, sf->path);
+        if (!normalized_path) {
+            set_session_error(s, "Out of memory deriving Rust source identity");
+            status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+            goto cleanup;
+        }
+        meta[i].crate = rust_find_nearest_crate(&crates, normalized_path);
+        meta[i].module_qn = meta[i].crate
+            ? rust_source_module_qn(&s->arena, meta[i].crate, normalized_path)
+            : NULL;
+        TSNode root = ts_tree_root_node(trees[i]);
+        meta[i].eligible = meta[i].crate && meta[i].module_qn &&
+            !ts_node_has_error(root) && !rust_source_has_unmodeled_cfg(sf->source);
+        if (!meta[i].eligible) continue;
+        status = rust_collect_definitions(&s->arena, &defs, &def_locs, root, sf->source,
+                                          meta[i].module_qn, NULL, NULL,
+                                          sf->path, sf->path_len);
+        if (status != SATORI_SEMANTIC_OK) {
+            set_session_error(s, status == SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED
+                ? "Resource limit exceeded while extracting Rust definitions"
+                : "Out of memory extracting Rust definitions");
+            goto cleanup;
+        }
+    }
+
+    {
+        CBMTypeRegistry *registry = cbm_rust_build_cross_registry(&s->arena, defs.items, (int)defs.count);
+        if (!registry) {
+            set_session_error(s, "Out of memory building Rust semantic registry");
+            status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+            goto cleanup;
+        }
+        uint64_t total_call_sites = 0;
+        for (uint32_t i = 0; i < s->source_count; i++) {
+            if (!meta[i].eligible) continue;
+            CBMResolvedCallArray resolved;
+            memset(&resolved, 0, sizeof(resolved));
+            cbm_run_rust_lsp_cross_with_registry(&s->arena, s->sources[i].source,
+                                                 (int)s->sources[i].source_len,
+                                                 meta[i].module_qn, registry,
+                                                 NULL, NULL, 0, trees[i],
+                                                 meta[i].crate ? &meta[i].crate->manifest : NULL,
+                                                 &resolved, NULL);
+            if (resolved.count < 0 ||
+                (uint64_t)resolved.count > SATORI_MAX_CALL_SITES - total_call_sites) {
+                set_session_error(s, "Resource limit exceeded: max Rust call sites exceeded");
+                status = SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
+                goto cleanup;
+            }
+            total_call_sites += (uint64_t)resolved.count;
+            status = append_semantic_results(s, &s->sources[i], meta[i].module_qn,
+                                             NULL, &resolved, &def_locs);
+            if (status != SATORI_SEMANTIC_OK) goto cleanup;
+        }
+    }
+
+cleanup:
+    if (trees) {
+        for (uint32_t i = 0; i < s->source_count; i++) {
+            if (trees[i]) ts_tree_delete(trees[i]);
+        }
+    }
+    free(trees);
+    free(meta);
+    free(crates.items);
+    free(defs.items);
+    free(def_locs.items);
+    if (parser) ts_parser_delete(parser);
+    return status;
 }
 
 int satori_semantic_resolve(SatoriSemanticHandle handle) {
@@ -1044,6 +2558,18 @@ int satori_semantic_resolve(SatoriSemanticHandle handle) {
 
     if (s->source_count == 0) {
         return SATORI_SEMANTIC_OK;
+    }
+    if (strcmp(s->language, "java") == 0) {
+        return resolve_java_project(s);
+    }
+    if (strcmp(s->language, "csharp") == 0) {
+        return resolve_csharp_project(s);
+    }
+    if (strcmp(s->language, "cpp") == 0) {
+        return resolve_cpp_project(s);
+    }
+    if (strcmp(s->language, "rust") == 0) {
+        return resolve_rust_project(s);
     }
 
     int status = SATORI_SEMANTIC_OK;

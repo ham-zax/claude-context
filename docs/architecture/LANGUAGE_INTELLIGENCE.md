@@ -77,21 +77,20 @@ Semantic analysis for CBM languages is executed in a sandboxed, high-performance
 
 ---
 
-## 4. Extension Runbook: Adding a New Language (e.g. Rust / TypeScript)
+## 4. Extension Runbook: Adding Another CBM-Backed Language
 
-Adding a second or third CBM-backed language to Satori requires **zero changes to the TypeScript dispatch and builder pipeline**:
+The compiled CBM semantic engine currently supports Go, Java, C#, C++, and Rust. Adding another CBM-backed language does not require a language branch in the TypeScript relationship builder:
 
-1. **Vendor Tree-sitter Grammar and Type Evaluator:**
-   - Add Tree-sitter C parser under `third_party/cbm-semantic/grammars/tree-sitter-<lang>/`.
-   - Add language type inference logic under `third_party/cbm-semantic/languages/<lang>/`.
-   - Wire language parser in `satori_semantic.c`.
-2. **Recompile WASM Engine:**
-   - Add compile units to `scripts/semantic-engine-build-config.mjs`.
-   - Run `pnpm semantic:build` to produce fresh `wasm` and manifest.
-3. **Register Language Descriptor:**
-   - Add entry in `packages/core/assets/semantic-engine/semantic-languages.json` with `strategy: "cbm_semantic"`, file extensions, and auxiliary patterns (e.g. `**/Cargo.toml`).
-4. **Verify & Test:**
-   - Run `pnpm semantic:verify`.
-   - Add characterization tests in `packages/core/src/relationships/`.
-5. **Promote Language:**
-   - Enable `'callGraphBuild'` capability in `packages/core/src/languages/capabilities.ts`.
+1. **Vendor the grammar and resolver closure:**
+   - Add the generated Tree-sitter parser/scanner and matching generated headers under `third_party/cbm-semantic/grammars/tree-sitter-<lang>/`.
+   - Add the CBM resolver and only the supporting source files it requires under `third_party/cbm-semantic/languages/<lang>/`.
+2. **Wire the native bridge and build:**
+   - Add the language to `third_party/cbm-semantic/satori_semantic.c` and `scripts/semantic-engine-build-config.mjs`.
+   - Run `pnpm semantic:build` to regenerate the WASM engine and manifest.
+3. **Register the descriptor:**
+   - Add the language to `packages/core/assets/semantic-engine/semantic-languages.json` with `strategy: "cbm_semantic"`, its extensions, semantic revision, grammar, and any build-context auxiliary files.
+4. **Qualify the runtime boundary:**
+   - Run `pnpm semantic:verify` and add focused relationship characterization/qualification coverage under `packages/core/src/relationships/`.
+   - Admit only resolver results whose target, caller, and required build context are proven. Keep receiver/dynamic dispatch and configuration-dependent cases fail-closed until separately modeled.
+5. **Promote the proven public slice:**
+   - In `packages/core/src/languages/capabilities.ts`, set `callsCapability` to `production_ready` and `publicClaim` to `calls_v0` only for the qualified slice. `callGraphBuild` and `callGraphQuery` derive from `callsCapability`; import/export, receiver-aware, and test-reference capabilities remain independent.

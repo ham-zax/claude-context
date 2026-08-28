@@ -14,11 +14,9 @@ test('defaultResolutionStrategyRegistry maps canonical languages to their correc
     assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('ts'), 'syntactic');
     assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('tsx'), 'syntactic');
     
-    // In Phase B, Go maps to 'cbm_semantic'
-    assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('go'), 'cbm_semantic');
-    assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('rust'), 'none');
-    assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('rs'), 'none');
-    assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('java'), 'none');
+    for (const language of ['go', 'rust', 'rs', 'java', 'csharp', 'cs', 'cpp', 'c++']) {
+        assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage(language), 'cbm_semantic', language);
+    }
     assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('unknown-lang'), 'none');
 });
 
@@ -32,7 +30,7 @@ test('DefaultLanguageResolutionStrategyRegistry accepts custom strategy override
     assert.equal(custom.strategyForLanguage('python'), 'none');
     assert.equal(custom.strategyForLanguage('py'), 'none');
     assert.equal(custom.strategyForLanguage('typescript'), 'syntactic');
-    assert.equal(custom.strategyForLanguage('rust'), 'none');
+    assert.equal(custom.strategyForLanguage('rust'), 'cbm_semantic');
 });
 
 import {

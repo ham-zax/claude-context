@@ -119,6 +119,22 @@ async function build() {
                     semanticRevision: 'go-v3',
                     grammar: 'tree-sitter-go',
                 },
+                java: {
+                    semanticRevision: 'java-v1',
+                    grammar: 'tree-sitter-java',
+                },
+                csharp: {
+                    semanticRevision: 'csharp-v1',
+                    grammar: 'tree-sitter-c-sharp',
+                },
+                cpp: {
+                    semanticRevision: 'cpp-v1',
+                    grammar: 'tree-sitter-cpp',
+                },
+                rust: {
+                    semanticRevision: 'rust-v1',
+                    grammar: 'tree-sitter-rust',
+                },
             },
         };
 

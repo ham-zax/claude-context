@@ -122,7 +122,7 @@ test("exact registry result publishes one concrete target and compact graph veri
 
 test("still-symbol-only graph language keeps exact read identity without a caller term", () => {
     const result = buildExactRegistryGroupResult({
-        symbol: makeSymbol({ language: "rust" }),
+        symbol: makeSymbol({ language: "scala" }),
         indexedAt: "2026-01-01T00:00:00.000Z",
         navigationState: navState,
         debugMode: 'none',

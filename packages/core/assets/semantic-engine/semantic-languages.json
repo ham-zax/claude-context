@@ -27,6 +27,99 @@
       "providerId": "satori-cbm-semantic-go",
       "providerVersion": "cbm-d150ebe4+satori-go-semantic-v3",
       "environmentConfigId": "cbm-go-semantic-v3"
+    },
+    {
+      "language": "java",
+      "canonicalLanguage": "java",
+      "extensions": [
+        ".java"
+      ],
+      "strategy": "cbm_semantic",
+      "semanticRevision": "java-v1",
+      "grammar": "tree-sitter-java",
+      "auxiliaryFiles": [
+        {
+          "pattern": "**/pom.xml",
+          "role": "manifest"
+        },
+        {
+          "pattern": "**/build.gradle",
+          "role": "manifest"
+        },
+        {
+          "pattern": "**/build.gradle.kts",
+          "role": "manifest"
+        }
+      ],
+      "providerId": "satori-cbm-semantic-java",
+      "providerVersion": "cbm-d150ebe4+satori-java-semantic-v1",
+      "environmentConfigId": "cbm-java-semantic-v1"
+    },
+    {
+      "language": "csharp",
+      "canonicalLanguage": "csharp",
+      "extensions": [
+        ".cs"
+      ],
+      "strategy": "cbm_semantic",
+      "semanticRevision": "csharp-v1",
+      "grammar": "tree-sitter-c-sharp",
+      "auxiliaryFiles": [
+        {
+          "pattern": ".csproj",
+          "role": "manifest"
+        }
+      ],
+      "providerId": "satori-cbm-semantic-csharp",
+      "providerVersion": "cbm-d150ebe4+satori-csharp-semantic-v1",
+      "environmentConfigId": "cbm-csharp-semantic-v1"
+    },
+    {
+      "language": "cpp",
+      "canonicalLanguage": "cpp",
+      "extensions": [
+        ".cpp",
+        ".c",
+        ".h",
+        ".hpp",
+        ".cc",
+        ".ccm",
+        ".cppm",
+        ".cxx",
+        ".hh",
+        ".hxx",
+        ".ixx"
+      ],
+      "strategy": "cbm_semantic",
+      "semanticRevision": "cpp-v1",
+      "grammar": "tree-sitter-cpp",
+      "auxiliaryFiles": [],
+      "providerId": "satori-cbm-semantic-cpp",
+      "providerVersion": "cbm-d150ebe4+satori-cpp-semantic-v1",
+      "environmentConfigId": "cbm-cpp-semantic-v1"
+    },
+    {
+      "language": "rust",
+      "canonicalLanguage": "rust",
+      "extensions": [
+        ".rs"
+      ],
+      "strategy": "cbm_semantic",
+      "semanticRevision": "rust-v1",
+      "grammar": "tree-sitter-rust",
+      "auxiliaryFiles": [
+        {
+          "pattern": "**/Cargo.toml",
+          "role": "manifest"
+        },
+        {
+          "pattern": "**/Cargo.lock",
+          "role": "lockfile"
+        }
+      ],
+      "providerId": "satori-cbm-semantic-rust",
+      "providerVersion": "cbm-d150ebe4+satori-rust-semantic-v1",
+      "environmentConfigId": "cbm-rust-semantic-v1"
     }
   ]
 }

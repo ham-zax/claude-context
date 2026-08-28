@@ -24,7 +24,7 @@ test('defaultSemanticLanguageRegistry loads from packaged assets and supports Go
     assert.equal(desc.environmentConfigId, 'cbm-go-semantic-v3');
     assert.equal(
         RELATIONSHIP_BUILDER_VERSION,
-        'relationship-v12+go-cbm-v3+python-cross-module-constructors+python-native-resolution-v1',
+        'relationship-v13+cbm-multilang-v1+python-cross-module-constructors+python-native-resolution-v1',
     );
 
     assert.equal(defaultSemanticLanguageRegistry.getStrategyForLanguage('go'), 'cbm_semantic');
@@ -48,7 +48,27 @@ test('SemanticLanguageRegistry matches auxiliary files per language correctly', 
 
     assert.equal(defaultSemanticLanguageRegistry.isAuxiliaryPath('go.mod'), true);
     assert.equal(defaultSemanticLanguageRegistry.isAuxiliaryPath('main.go'), false);
-    assert.equal(defaultSemanticLanguageRegistry.isAuxiliaryPath('Cargo.toml'), false);
+    assert.equal(defaultSemanticLanguageRegistry.isAuxiliaryPath('Cargo.toml'), true);
+
+    const matchesCargo = defaultSemanticLanguageRegistry.matchAuxiliaries('crate/Cargo.toml');
+    assert.equal(matchesCargo.length, 1);
+    assert.equal(matchesCargo[0].role, 'manifest');
+    assert.equal(matchesCargo[0].language, 'rust');
+
+    const matchesPom = defaultSemanticLanguageRegistry.matchAuxiliaries('service/pom.xml');
+    assert.equal(matchesPom.length, 1);
+    assert.equal(matchesPom[0].role, 'manifest');
+    assert.equal(matchesPom[0].language, 'java');
+
+    const matchesGradle = defaultSemanticLanguageRegistry.matchAuxiliaries('service/build.gradle.kts');
+    assert.equal(matchesGradle.length, 1);
+    assert.equal(matchesGradle[0].role, 'manifest');
+    assert.equal(matchesGradle[0].language, 'java');
+
+    const matchesCsproj = defaultSemanticLanguageRegistry.matchAuxiliaries('service/Demo.csproj');
+    assert.equal(matchesCsproj.length, 1);
+    assert.equal(matchesCsproj[0].role, 'manifest');
+    assert.equal(matchesCsproj[0].language, 'csharp');
 });
 
 test('SemanticLanguageRegistry supports multi-language auxiliary routing without cross-talk', () => {

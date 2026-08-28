@@ -77,6 +77,26 @@ function symbolOnlyLanguage(input: {
     });
 }
 
+function directCallsSymbolLanguage(input: {
+    readonly languageId: string;
+    readonly aliases: readonly string[];
+    readonly extensions: readonly string[];
+    readonly fixtures: Required<Pick<LanguageCapabilityDeclaration['fixtures'], 'navigation' | 'symbols' | 'ownerMetadata' | 'fileOutline' | 'readFileOpenSymbol' | 'calls'>>;
+}): LanguageCapabilityDeclaration {
+    return declaration({
+        ...input,
+        searchEligibility: PRODUCTION_READY,
+        parserCapability: PRODUCTION_READY,
+        symbolExtractionCapability: PRODUCTION_READY,
+        ownerExtractionCapability: PRODUCTION_READY,
+        importExportCapability: NONE,
+        callsCapability: PRODUCTION_READY,
+        typeReceiverAwareCapability: NONE,
+        testReferenceCapability: NONE,
+        publicClaim: 'calls_v0',
+    });
+}
+
 function searchOnlyLanguage(input: {
     readonly languageId: string;
     readonly aliases: readonly string[];
@@ -243,7 +263,7 @@ const CMM_DERIVED_SEARCH_ONLY_DECLARATIONS: readonly LanguageCapabilityDeclarati
 ];
 
 const SATORI_DECLARATIONS: readonly LanguageCapabilityDeclaration[] = [
-    symbolOnlyLanguage({
+    directCallsSymbolLanguage({
         languageId: 'cpp',
         aliases: ['c++'],
         extensions: ['.cpp', '.c', '.h', '.hpp', '.cc', '.ccm', '.cppm', '.cxx', '.hh', '.hxx', '.ixx'],
@@ -256,9 +276,10 @@ const SATORI_DECLARATIONS: readonly LanguageCapabilityDeclaration[] = [
             ownerMetadata: ['packages/mcp/src/core/search-group-results.ownership.test.ts'],
             fileOutline: ['packages/mcp/src/tools/file_outline.test.ts'],
             readFileOpenSymbol: ['packages/mcp/src/core/current-source-symbols.test.ts'],
+            calls: ['packages/core/src/relationships/cbm-language-call-qualification.test.ts'],
         },
     }),
-    symbolOnlyLanguage({
+    directCallsSymbolLanguage({
         languageId: 'csharp',
         aliases: ['cs'],
         extensions: ['.cs'],
@@ -271,6 +292,7 @@ const SATORI_DECLARATIONS: readonly LanguageCapabilityDeclaration[] = [
             ownerMetadata: ['packages/mcp/src/core/search-group-results.ownership.test.ts'],
             fileOutline: ['packages/mcp/src/tools/file_outline.test.ts'],
             readFileOpenSymbol: ['packages/mcp/src/core/current-source-symbols.test.ts'],
+            calls: ['packages/core/src/relationships/cbm-language-call-qualification.test.ts'],
         },
     }),
     declaration({
@@ -298,7 +320,7 @@ const SATORI_DECLARATIONS: readonly LanguageCapabilityDeclaration[] = [
         },
         publicClaim: 'calls_v0',
     }),
-    symbolOnlyLanguage({
+    directCallsSymbolLanguage({
         languageId: 'java',
         aliases: [],
         extensions: ['.java'],
@@ -311,6 +333,7 @@ const SATORI_DECLARATIONS: readonly LanguageCapabilityDeclaration[] = [
             ownerMetadata: ['packages/mcp/src/core/search-group-results.ownership.test.ts'],
             fileOutline: ['packages/mcp/src/tools/file_outline.test.ts'],
             readFileOpenSymbol: ['packages/mcp/src/core/current-source-symbols.test.ts'],
+            calls: ['packages/core/src/relationships/cbm-language-call-qualification.test.ts'],
         },
     }),
     fullNavigationLanguage({
@@ -339,7 +362,7 @@ const SATORI_DECLARATIONS: readonly LanguageCapabilityDeclaration[] = [
         aliases: ['py'],
         extensions: ['.py'],
     }),
-    symbolOnlyLanguage({
+    directCallsSymbolLanguage({
         languageId: 'rust',
         aliases: ['rs'],
         extensions: ['.rs'],
@@ -352,6 +375,7 @@ const SATORI_DECLARATIONS: readonly LanguageCapabilityDeclaration[] = [
             ownerMetadata: ['packages/mcp/src/core/search-group-results.ownership.test.ts'],
             fileOutline: ['packages/mcp/src/tools/file_outline.test.ts'],
             readFileOpenSymbol: ['packages/mcp/src/core/current-source-symbols.test.ts'],
+            calls: ['packages/core/src/relationships/cbm-language-call-qualification.test.ts'],
         },
     }),
     symbolOnlyLanguage({

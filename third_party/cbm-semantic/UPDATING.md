@@ -47,7 +47,7 @@ When updating upstream CBM code from [DeusData/codebase-memory-mcp](https://gith
 
 1. **Pull and inspect changes**:
    - Compare upstream commits against `PINNED_UPSTREAM_COMMIT` in `scripts/semantic-engine-build-config.mjs`.
-   - Copy relevant source updates in `common/`, `languages/go/`, or add new language directories under `languages/<lang>/`.
+   - Copy relevant source updates in `common/` or the existing `languages/{go,java,csharp,cpp,rust}/` closures, or add a new language directory under `languages/<lang>/`.
 2. **Update Build Configuration**:
    - If new source files were added, update `COMPILE_UNITS` and `INCLUDE_DIRS` in `scripts/semantic-engine-build-config.mjs`.
    - Update `PINNED_UPSTREAM_COMMIT` to the new upstream SHA.
@@ -69,10 +69,10 @@ When updating upstream CBM code from [DeusData/codebase-memory-mcp](https://gith
 
 ## 4. Adding a New Language Grammar & Resolver
 
-To add a new language (e.g. Rust, TypeScript, Java) to the compiled semantic engine:
+To add another CBM-backed language to the compiled semantic engine:
 
 1. **Vendor Tree-sitter Grammar**:
-   - Place Tree-sitter parser C files under `third_party/cbm-semantic/grammars/tree-sitter-<lang>/`.
+   - Place the generated parser/scanner and that grammar snapshot's `tree_sitter/*.h` closure under `third_party/cbm-semantic/grammars/tree-sitter-<lang>/`; generated parsers must compile against their matching generated parser header.
 2. **Vendor Language Resolver**:
    - Place language LSP / type-evaluator under `third_party/cbm-semantic/languages/<lang>/`.
 3. **Update Satori Bridge (`satori_semantic.c`)**:
@@ -81,3 +81,7 @@ To add a new language (e.g. Rust, TypeScript, Java) to the compiled semantic eng
    - Add language descriptor in `packages/core/assets/semantic-engine/semantic-languages.json` specifying extensions, auxiliary file patterns, revision, and grammar name.
 5. **Compile and Verify**:
    - Run `pnpm semantic:build` then `pnpm semantic:verify`.
+6. **Qualify Public Calls Conservatively**:
+   - Characterize the upstream strategy labels and map only exact, configuration-proven direct bindings to `direct_call`.
+   - Keep receiver/dynamic dispatch below the public boundary until `typeReceiverAwareCapability` is independently qualified.
+   - Treat language build context as semantic authority: Go module/build tags, Java Maven/Gradle roots, C# `.csproj` roots, Rust Cargo/`cfg`, and C/C++ preprocessor/translation-unit visibility must fail closed when Satori does not model the relevant configuration.

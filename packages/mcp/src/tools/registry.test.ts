@@ -85,8 +85,12 @@ test('call_graph description is capability-based and calibrates conservative CAL
     assert.match(callGraphTool!.description, /current Publication/i);
     assert.match(callGraphTool!.description, /heuristic/i);
     assert.match(callGraphTool!.description, /name-based/i);
-    assert.match(callGraphTool!.description, /Go.*qualified direct calls/i);
-    assert.match(callGraphTool!.description, /excludes receiver\/type-aware dispatch/i);
+    assert.match(callGraphTool!.description, /Go, Java, C#, C\+\+, and Rust.*qualified direct-call/i);
+    assert.match(callGraphTool!.description, /exclude receiver\/type-aware dispatch/i);
+    assert.match(callGraphTool!.description, /Java and C#.*same detected build root/i);
+    assert.match(callGraphTool!.description, /Maven\/Gradle.*\.csproj/i);
+    assert.match(callGraphTool!.description, /C\+\+.*cross-translation-unit/i);
+    assert.match(callGraphTool!.description, /Rust.*Cargo ownership/i);
     assert.match(callGraphTool!.description, /Python and Go.*testReferences/i);
     assert.match(callGraphTool!.description, /bounded/i);
     assert.match(callGraphTool!.description, /advisory/i);

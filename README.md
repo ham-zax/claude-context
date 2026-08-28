@@ -431,7 +431,7 @@ an explicit authoritative rank.
 
 ## Language Support
 
-Search and bounded reads work across the indexed text and language catalog. Rich symbol navigation depends on parser evidence. TypeScript, JavaScript, Python, and Go expose production `CALLS v0` and resolved test-reference navigation when the current Publication has compatible relationship navigation. Python and Go additionally expose on-demand `file_outline(detail="analysis")` structural metrics for exact functions and methods. Go support is conservative direct-call evidence only: receiver/type, embedded/interface dispatch, callbacks/callable aliases, and unknown strategies are not claimed as authoritative Go calls. Other supported languages may provide symbols without graph traversal. Inspect `manage_index status` instead of assuming every indexed language is graph-ready.
+Search and bounded reads work across the indexed text and language catalog. Rich symbol navigation depends on parser evidence. TypeScript, JavaScript, Python, Go, Java, C#, C++, and Rust expose production `CALLS v0` when the current Publication has compatible relationship navigation. Resolved test-reference navigation remains limited to the languages whose test-reference capability is separately qualified, including TypeScript, JavaScript, Python, and Go. Python and Go additionally expose on-demand `file_outline(detail="analysis")` structural metrics for exact functions and methods. The CBM-backed languages use conservative direct-call slices: Go excludes receiver/type, embedded/interface dispatch, callbacks/callable aliases, and unknown strategies; Java and C# admit exact static bindings only within the same detected build root (Maven/Gradle or `.csproj`), falling back to the same source directory when no manifest establishes broader authority, and exclude receiver dispatch; C++ currently admits exact same-translation-unit direct calls and rejects unproved cross-translation-unit or conditional-preprocessor cases; Rust requires Cargo package ownership and rejects receiver dispatch plus unmodeled `cfg`-dependent sources. Scala may provide symbols without graph traversal. Inspect `manage_index status` instead of assuming every indexed language is graph-ready.
 
 Python inbound relationships are qualified for bounded static patterns,
 including absolute-import constructor receivers and direct service or callback
@@ -454,7 +454,7 @@ Structural definition coverage is intentionally language-specific:
 | C++ | Namespaces, classes, structs, enums, unions, typedefs/types, and callable declarations or definitions |
 | Scala | Packages, classes, traits, objects, enums, types, functions, methods, and named package-level vals, vars, or givens |
 
-`.c` and `.h` files currently use the C++ parser for a proven common-C subset; Satori does not claim a native C parser. Definition coverage improves outline, exact-open, and ownership navigation. It does not by itself imply call-graph or type-resolution support.
+`.c` and `.h` files currently use the C++ parser for a proven common-C subset; Satori does not claim a native C parser or independent C type system. `CALLS v0` for that routed subset is limited to exact same-translation-unit direct bindings that survive the C++ semantic gate.
 
 ## Privacy and Limits
 

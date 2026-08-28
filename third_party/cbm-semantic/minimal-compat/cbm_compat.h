@@ -32,6 +32,7 @@ typedef enum {
     CBM_LANG_KOTLIN,
     CBM_LANG_RUBY,
     CBM_LANG_C,
+    CBM_LANG_CUDA,
     CBM_LANG_UNKNOWN = 999
 } CBMLanguage;
 
@@ -39,6 +40,68 @@ typedef enum {
     CBM_ORIGIN_RAW = 0,
     CBM_ORIGIN_PREPROCESSED
 } CBMSourceOrigin;
+
+#define CBM_SOURCE_ORIGIN_RAW CBM_ORIGIN_RAW
+#define CBM_SOURCE_ORIGIN_PREPROCESSED CBM_ORIGIN_PREPROCESSED
+
+typedef struct {
+    const char *expr;
+    const char *value;
+    const char *keyword;
+    int index;
+} CBMCallArg;
+
+#define CBM_MAX_CALL_ARGS 8
+
+typedef struct {
+    const char *callee_name;
+    const char *enclosing_func_qn;
+    const char *first_string_arg;
+    const char *second_arg_name;
+    CBMCallArg args[CBM_MAX_CALL_ARGS];
+    int arg_count;
+    int loop_depth;
+    int branch_depth;
+    int start_line;
+    uint32_t site_start_byte;
+    uint32_t site_end_byte;
+    CBMSourceOrigin source_origin;
+    bool is_method;
+    bool requires_lsp_resolution;
+} CBMCall;
+
+typedef struct {
+    CBMCall *items;
+    int count;
+    int cap;
+} CBMCallArray;
+
+static inline void cbm_calls_push(CBMCallArray *arr, CBMArena *a, CBMCall call) {
+    if (!arr || !a) return;
+    if (arr->count >= arr->cap) {
+        int new_cap = arr->cap == 0 ? 16 : arr->cap * 2;
+        CBMCall *items = (CBMCall *)cbm_arena_alloc(a, (size_t)new_cap * sizeof(CBMCall));
+        if (!items) return;
+        if (arr->items && arr->count > 0) {
+            memcpy(items, arr->items, (size_t)arr->count * sizeof(CBMCall));
+        }
+        arr->items = items;
+        arr->cap = new_cap;
+    }
+    arr->items[arr->count++] = call;
+}
+
+typedef struct {
+    const char *trait_name;
+    const char *struct_name;
+    const char *struct_qn;
+} CBMImplTrait;
+
+typedef struct {
+    CBMImplTrait *items;
+    int count;
+    int cap;
+} CBMImplTraitArray;
 
 typedef enum {
     CBM_RESOLVED_INVOCATION = 0,
@@ -143,7 +206,9 @@ typedef struct {
 typedef struct CBMFileResult {
     CBMArena arena;
     CBMDefArray defs;
+    CBMCallArray calls;
     CBMImportArray imports;
+    CBMImplTraitArray impl_traits;
     CBMResolvedCallArray resolved_calls;
     const char *module_qn;
     const char *namespace_name;

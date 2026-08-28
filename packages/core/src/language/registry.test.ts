@@ -59,13 +59,21 @@ test('language registry routes modern module and systems extensions through qual
     assert.equal(isLanguageCapabilitySupportedForExtension('.kts', 'owner'), false);
 });
 
-test('unpromoted L1 candidate languages do not claim graph capabilities by routing alone', () => {
-    for (const language of ['rust', 'java', 'csharp', 'cpp', 'scala', 'php', 'ruby', 'kotlin', 'swift']) {
+test('language capability tiers expose promoted CBM calls without promoting unrelated graph surfaces', () => {
+    for (const language of ['scala', 'php', 'ruby', 'kotlin', 'swift']) {
         assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'search'), true, language);
         assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'callGraph'), false, language);
         assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'callGraphBuild'), false, language);
         assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'callGraphQuery'), false, language);
         assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'testLinks'), false, language);
+    }
+    for (const language of ['rust', 'java', 'csharp', 'cpp']) {
+        assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'search'), true, language);
+        assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'callGraph'), true, language);
+        assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'callGraphBuild'), true, language);
+        assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'callGraphQuery'), true, language);
+        assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'testLinks'), false, language);
+        assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'imports'), false, language);
     }
     for (const language of ['go', 'rust', 'java', 'csharp', 'cpp', 'scala']) {
         assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'symbols'), true, language);
