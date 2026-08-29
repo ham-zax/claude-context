@@ -1,12 +1,30 @@
 # Satori Language Intelligence & Semantic Architecture
 
-This document specifies the architecture, invariants, boundaries, and extension mechanics of Satori's multi-language semantic resolution platform.
+This document is the current architecture reference for Satori's language analysis, symbol navigation, relationship resolution, capability admission, and semantic-engine extension boundaries.
 
 ---
 
 ## 1. Executive Summary
 
-Satori's language intelligence platform is designed around **high-precision, proof-backed semantic relationship extraction** across diverse programming languages. Rather than relying on fragile syntactic heuristics or language-specific branching across indexing and relationship pipelines, Satori uses a **three-tier decoupled architecture**:
+Satori does not force every language through one parser or one resolver. The public contract is capability-driven: a language is promoted only for the slice the repository can prove, and unsupported receiver/dynamic/build-context semantics abstain instead of producing guessed edges.
+
+Current production surface:
+
+| Language | Structural backend | CALLS backend | Public calls | Test references |
+|---|---|---|---|---|
+| TypeScript | OXC | Satori syntactic | `calls_v0` | production |
+| JavaScript | OXC | Satori syntactic | `calls_v0` | production |
+| Python | Satori Tree-sitter WASM | `python_native` | `calls_v0` | production |
+| Go | CBM WASM | `cbm_semantic` | `calls_v0` | production |
+| Java | structural symbols + CBM project analyzer | `cbm_semantic` | `calls_v0` | none |
+| C# | structural symbols + CBM project analyzer | `cbm_semantic` | `calls_v0` | none |
+| C++ | structural symbols + CBM project analyzer | `cbm_semantic` | `calls_v0` | none |
+| Rust | structural symbols + CBM project analyzer | `cbm_semantic` | `calls_v0` | none |
+| Scala | Satori Tree-sitter WASM | Satori syntactic | `calls_v0` | none |
+
+`calls_v0` is a conservative navigation claim, not a promise of compiler-complete dynamic dispatch. Java/C# currently admit exact static bindings inside proved project authority; C++ admits exact same-translation-unit direct calls; Rust requires Cargo ownership and excludes unmodeled `cfg`/receiver cases; Scala admits unique direct non-member calls and abstains on member or ambiguous targets.
+
+The generic relationship pipeline is decoupled into descriptors, strategy dispatch/admission, and backend-specific evidence. CBM-backed languages additionally use an isolated WebAssembly semantic engine:
 
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
@@ -43,7 +61,7 @@ Language capabilities, file extensions, semantic revisions, grammar references, 
 * **Auxiliary File Routing:** The `SemanticLanguageRegistry` matches and routes auxiliary configuration files directly to their owning language without hardcoding file names into generic indexing logic.
 
 ### Tier 2: Generic Strategy Dispatch & Central Admission
-Relationship construction in `packages/core/src/relationships/builder.ts` is fully strategy-driven and free of hardcoded language branches:
+Relationship construction in `packages/core/src/relationships/builder.ts` is strategy-driven. Language-specific semantics stay in the selected analyzer/resolver rather than leaking into generic relationship admission:
 
 1. **Resolution Strategy Selection:** Each source file is routed to its designated strategy (`python_native`, `cbm_semantic`, `syntactic`). Python uses the native Python resolver; TypeScript, JavaScript, and Scala use the built-in syntactic resolver; descriptor-registered languages use the CBM semantic path.
 2. **Generic CBM Contribution Engine (`cbm.ts`):** Handles any CBM-backed language uniformly by consuming `SemanticProjectEvidence` produced by the semantic analyzer.
@@ -52,8 +70,8 @@ Relationship construction in `packages/core/src/relationships/builder.ts` is ful
    - Enforces existence and matching of target callable symbols.
    - Stamps deterministic confidence (`high` for intra-file, `low` for cross-file) and authoritative proof provenance (`direct_binding`, `origin_flow`).
 
-### Tier 3: High-Performance WebAssembly Engine
-Semantic analysis for CBM languages is executed in a sandboxed, high-performance WebAssembly module compiled from C11 sources (`third_party/cbm-semantic/`) with Emscripten:
+### Tier 3: CBM WebAssembly Engine
+Go, Java, C#, C++, and Rust semantic project analysis is executed in a sandboxed WebAssembly module compiled from C11 sources (`third_party/cbm-semantic/`) with Emscripten. TypeScript/JavaScript, Python, and Scala do not use this CBM semantic path:
 
 * **64-Byte POD ABI:** Relationships, definitions, and diagnostics are exported as fixed-width, memory-aligned 64-byte C structures (`SatoriSemanticResultV1`, `SatoriSemanticDefinitionV1`, `SatoriSemanticDiagnosticV1`) with static compile-time assertions on struct sizes and field offsets.
 * **String Table Offsets:** All strings cross the WASM/TS boundary as 32-bit byte offsets into a contiguous UTF-8 buffer, eliminating dynamic string allocation overhead.
@@ -72,8 +90,8 @@ Semantic analysis for CBM languages is executed in a sandboxed, high-performance
    - **Public Satori Promotion:** Controlled by `isLanguageCapabilitySupportedForLanguage(lang, 'callGraphBuild')`. Unpromoted languages can be tested in `qualification` mode without exposing unverified edges in production.
 3. **Single Registry Composition:**
    - A single `SemanticLanguageRegistry` instance is instantiated per runtime composition and threaded through `IndexGenerationWorkflow` $\to$ `buildRelationshipsForRegistry` $\to$ `LanguageResolutionStrategyRegistry` $\to$ `CbmSemanticContributionEngine`.
-4. **Incremental Rebuild Freshness:**
-   - During sync deltas (`rebuildNavigationArtifactsForSyncDelta()`), when any source or semantic auxiliary file of a CBM language changes, the complete source snapshot for that language is re-read and re-analyzed, and all relationships for that language are updated in the navigation delta.
+4. **Publication Freshness:**
+   - Relationship output is part of the same immutable Publication as search and symbol state. Sync/reindex may reuse bounded analysis work internally, but readers never observe a mixed generation: the replacement Publication becomes current only after its complete navigation state is ready.
 
 ---
 

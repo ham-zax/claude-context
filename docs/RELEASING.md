@@ -59,8 +59,23 @@ incomplete, mismatched, out-of-root, or downgrade-producing closures.
 
 ## Release Procedure
 
-The repository enforces the release graph before any publication. Four commands
-are available:
+The repository enforces the release graph before any publication. Authenticate
+with npm separately before the publication command; `release:all` deliberately
+does not start an interactive login flow.
+
+```bash
+pnpm run release:login
+npm whoami --registry=https://registry.npmjs.org/
+```
+
+`release:login` runs npm's web-login flow. The `whoami` command must return the
+npm account that has publish access to the `@zokizuan` packages. Do not continue
+with publication if it returns `E401`, an unexpected identity, or an account
+without package write access. npm can surface a scoped-package write-permission
+failure as `E404 Not Found` on the publish `PUT`, so verify identity before
+interpreting a publish-time 404 as a missing package.
+
+The repository release commands are:
 
 ```text
 versions:check
@@ -130,20 +145,20 @@ If npm metadata cannot be verified (network failure, malformed output,
 authentication error, registry outage), the check fails closed. A registry 404
 for the exact version is the only response treated as "unpublished".
 
-Example of a valid release candidate:
+Example shape of a valid release candidate:
 
 ```text
 Satori release graph
 
-Package                         Local   Registry state       Action
-@zokizuan/satori-core           3.6.0   unpublished          publish
-@zokizuan/satori-mcp            6.8.0   unpublished          publish
-@zokizuan/satori-cli            1.9.0   unpublished          publish
+Package                         Local            Registry state   Action
+@zokizuan/satori-core           <core-version>   unpublished      publish
+@zokizuan/satori-mcp            <mcp-version>    unpublished      publish
+@zokizuan/satori-cli            <cli-version>    unpublished      publish
 
 Packed dependency graph
-@zokizuan/satori-mcp -> @zokizuan/satori-core@3.6.0
-@zokizuan/satori-cli -> @zokizuan/satori-mcp@6.8.0
-@zokizuan/satori-cli -> @zokizuan/satori-core@3.6.0
+@zokizuan/satori-mcp -> @zokizuan/satori-core@<core-version>
+@zokizuan/satori-cli -> @zokizuan/satori-mcp@<mcp-version>
+@zokizuan/satori-cli -> @zokizuan/satori-core@<core-version>
 
 Release graph valid.
 ```
@@ -185,21 +200,11 @@ Preview mode performs no writes. Mutation requires `--apply`, which also
 requires a clean working tree, runs `versions:check`, regenerates `server.json`
 when MCP changes, and restores every file if generation or validation fails.
 
-Example from a fully published state:
-
-```text
-Core  3.6.0 -> 3.7.0
-MCP   6.8.0 -> 6.8.1
-CLI   1.9.0 -> 1.9.1
-```
-
-Example from the prepared-but-unpublished state:
-
-```text
-Core  3.6.0 -> unchanged, already unpublished
-MCP   6.8.0 -> unchanged, already unpublished
-CLI   1.9.0 -> unchanged, already unpublished
-```
+From a fully published state, the planner advances the requested package and
+every reverse dependency that must carry a new exact pin. From a
+prepared-but-unpublished state, a version already high enough for the requested
+intent remains unchanged and absorbs the coordinated changes. Always use the
+planner output rather than copying version numbers from this document.
 
 ### `pnpm run release:all`
 
@@ -212,10 +217,11 @@ The single supported publication path. It runs:
 4. final verification that all exact versions and all three `latest` tags form
    the expected local Core -> MCP -> CLI closure.
 
-Preconditions: clean working tree, `master` branch, `HEAD` exactly equal to
-`master` fetched directly from `https://github.com/ham-zax/satori.git` into the
-dedicated `refs/remotes/satori-release/master` authority ref, and a valid
-monotonic release graph. Source authority is fetched and checked both before
+Preconditions: a valid npm login with publish access to the scoped packages, a
+clean working tree, `master` branch, `HEAD` exactly equal to `master` fetched
+directly from `https://github.com/ham-zax/satori.git` into the dedicated
+`refs/remotes/satori-release/master` authority ref, and a valid monotonic
+release graph. Source authority is fetched and checked both before
 and after qualification, immediately before any registry write.
 Already-published identical packages are skipped only after their `latest` tags
 are verified before the first registry write. An intentional emergency release

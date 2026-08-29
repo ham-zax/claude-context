@@ -2,7 +2,7 @@
 
 Audit date: 2026-07-26
 
-> Historical audit: this document records the repository as it existed on 2026-07-26 and is not the current architecture contract. The clean-break architecture now uses immutable Publications selected by `PublicationStore.current()` through its durable `current.json` pointer as the sole indexed/source/navigation/policy authority, Core-owned root mutation/read-lease runtimes, and no MCP `SnapshotManager` or completion-marker authority.
+> **Historical snapshot.** This audit records the repository as it existed on 2026-07-26 and is not the current product or architecture contract. It intentionally preserves retired ownership/storage terminology as historical evidence. For the current system, start with [`../README.md`](../README.md), [`LANGUAGE_INTELLIGENCE.md`](./LANGUAGE_INTELLIGENCE.md), and the root [`README.md`](../../README.md).
 
 Scope: read-only architecture audit of the Core and MCP runtime ownership
 boundaries. No production code, tests, configuration, schemas, generated

@@ -5,35 +5,35 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="logo.svg" />
-  <title>Satori | Codebase Map for AI Coding Agents</title>
+  <title>Satori | Fast Local Repository Intelligence for Coding Agents</title>
   <meta name="description"
-    content="Most agents can search files — that is not enough. Satori is a read-only codebase map for MCP-compatible coding agents: less grep chaining, less context waste, fewer blind edits." />
-  <meta name="keywords" content="Satori, MCP server, AI coding agents, code search, semantic code search, repo indexing, Codex, Claude Code, OpenCode, Milvus, Zilliz" />
+    content="Satori is a local-first repository intelligence layer for MCP coding agents: fast semantic retrieval, exact symbols, conservative call graphs, atomic Publications, and freshness-aware navigation before the first edit." />
+  <meta name="keywords" content="Satori, MCP server, AI coding agents, repository intelligence, semantic code search, call graph, code navigation, Codex, Claude Code, OpenCode, LanceDB" />
   <meta name="robots" content="index,follow" />
   <link rel="canonical" href="https://satori.hamza.my.id/" />
-  <meta property="og:title" content="Satori | Codebase Map for AI Coding Agents" />
-  <meta property="og:description" content="Real repos are not flat text dumps. Satori gives MCP-compatible coding agents a route from plain-English intent to owner symbols, exact evidence, and freshness-aware recovery — before they edit." />
+  <meta property="og:title" content="Satori | Fast Local Repository Intelligence for Coding Agents" />
+  <meta property="og:description" content="Search locally, land on exact symbols, inspect qualified callers and callees, and stay pinned to one fresh atomic Publication before an agent edits code." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://satori.hamza.my.id/" />
   <meta property="og:site_name" content="Satori" />
   <meta property="og:image" content="https://satori.hamza.my.id/og-image.svg" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Satori | Codebase Map for AI Coding Agents" />
-  <meta name="twitter:description" content="Most agents can search files. That is not enough. Satori gives them a structured map before the first diff." />
+  <meta name="twitter:title" content="Satori | Fast Local Repository Intelligence for Coding Agents" />
+  <meta name="twitter:description" content="Fast local retrieval, exact symbols, conservative call graphs, and atomic repo Publications for MCP coding agents." />
   <meta name="twitter:image" content="https://satori.hamza.my.id/og-image.svg" />
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
       "name": "Satori",
-      "description": "Read-only codebase map for MCP-compatible coding agents: plain-English intent to owner symbols, exact reads, advisory call context, and freshness-aware recovery — with less token waste and fewer blind edits.",
+      "description": "Local-first repository intelligence for MCP-compatible coding agents: fast semantic retrieval, exact symbols, qualified call navigation, and freshness-safe atomic Publications.",
       "codeRepository": "https://github.com/ham-zax/satori",
       "url": "https://satori.hamza.my.id/",
       "programmingLanguage": "TypeScript",
       "runtimePlatform": "Node.js",
       "license": "https://spdx.org/licenses/AGPL-3.0-only.html",
       "applicationCategory": "DeveloperApplication",
-      "operatingSystem": "Cross-platform",
+      "operatingSystem": "Linux x64",
       "offers": {
         "@type": "Offer",
         "price": "0",
@@ -1471,17 +1471,17 @@
     <main id="main">
     <section class="hero" id="top">
       <h1><img class="hero-logo" src="logo-mark.svg" alt="" aria-hidden="true" />Satori</h1>
-      <h2>Give coding agents the route from intent to evidence.</h2>
-      <p>Most AI coding agents can search files. That is not enough.</p>
+      <h2>Fast local repository intelligence before the first edit.</h2>
+      <p>Search is useful. A coding agent also needs ownership, structure, relationships, and freshness.</p>
       <p>
-        Real codebases are not flat text dumps. They have symbols, ownership
-        boundaries, wrappers, callers, callees, stale files, and logic spread
-        across folders.
+        Satori builds one atomic repository Publication that combines semantic
+        retrieval, symbol intelligence, structural analysis, and qualified call
+        relationships. Every request is pinned to one coherent generation.
       </p>
       <p>
-        Satori is an open-source, read-only codebase map for MCP-compatible
-        agents: less grep chaining, less context waste, fewer blind edits, and
-        more visible evidence before the first diff.
+        The result is a smaller, evidence-first path from intent to the code that
+        owns the behavior — without turning a repository into a sequence of grep
+        dumps or guessing through ambiguous call targets.
       </p>
       <div class="hero-terminal" role="group" aria-labelledby="hero-install-label">
         <div class="terminal-label">
@@ -1512,11 +1512,11 @@ npx -y @zokizuan/satori-cli@latest doctor</code></pre>
         </a>
       </div>
       <div class="trust-chips" role="list" aria-label="Satori trust signals">
-        <span class="trust-chip" role="listitem">AGPL-3.0-only open source</span>
-        <span class="trust-chip" role="listitem">Six MCP tools</span>
-        <span class="trust-chip" role="listitem">Installer-owned startup</span>
-        <span class="trust-chip" role="listitem">Does not edit source code</span>
-        <span class="trust-chip" role="listitem">Freshness warnings</span>
+        <span class="trust-chip" role="listitem">154.543 ms warm-search p95 benchmark</span>
+        <span class="trust-chip" role="listitem">Seven MCP tools</span>
+        <span class="trust-chip" role="listitem">Nine CALLS v0 languages</span>
+        <span class="trust-chip" role="listitem">Atomic Publications</span>
+        <span class="trust-chip" role="listitem">Read-only source access</span>
       </div>
     </section>
 
@@ -1608,10 +1608,10 @@ npx -y @zokizuan/satori-cli@latest doctor</code></pre>
         </div>
         <div class="flow-item">
           <span class="flow-index">03</span>
-          <strong>Outline, then exact reads</strong>
+          <strong>Outline, then read exactly</strong>
           <p>
-            Open the function, class, or line range that matters instead of flooding
-            the agent with broad file dumps.
+            Use the outline to identify the owner, then open the exact indexed symbol
+            or bounded source span instead of a broad file dump.
           </p>
         </div>
         <div class="flow-item">
@@ -1636,51 +1636,56 @@ npx -y @zokizuan/satori-cli@latest doctor</code></pre>
     </section>
 
     <section class="section">
-      <h3>Core Capabilities</h3>
+      <h3>One Local Intelligence Layer</h3>
       <p class="section-intro">
-        Satori is not another semantic search box. It gives coding agents structured
-        repo context they can act on: intent retrieval, owner symbols, exact reads,
-        advisory related paths, freshness state, and recovery steps — so investigation
-        costs less and leaves evidence you can inspect.
+        Satori keeps retrieval, symbols, call relationships, and freshness under one
+        Publication authority. The public surface stays small while the evidence behind
+        each result stays explicit and conservative.
       </p>
       <div class="grid">
         <article class="card">
-          <h4>Plain-English retrieval</h4>
+          <h4>Fast local retrieval</h4>
           <p>
-            Find behavior from intent, not only filenames or exact tokens.
+            Potion embeddings and LanceDB are the default local path. On Satori's
+            10,830-chunk warm benchmark, search measured 154.543 ms p95 against a
+            300 ms release gate.
           </p>
         </article>
         <article class="card">
-          <h4>Symbol-aware navigation</h4>
+          <h4>Production symbol navigation</h4>
           <p>
-            Open symbols and outlines for TypeScript, JavaScript, Python, C++,
-            C#, Go, Java, Rust, and Scala from compatible navigation sidecars.
+            TypeScript, JavaScript, Python, Go, Java, C#, C++, Rust, and Scala
+            expose production symbols and file outlines from the current Publication.
           </p>
         </article>
         <article class="card">
-          <h4>Exact reads</h4>
+          <h4>Bounded exact reads</h4>
           <p>
-            Open exact symbols or line ranges instead of feeding the agent a
-            noisy file dump.
+            Resolve an exact indexed symbol or a bounded source window with
+            <code>read_file</code> instead of feeding the agent an unbounded file dump.
           </p>
         </article>
         <article class="card">
-          <h4>Related code paths</h4>
+          <h4>Conservative CALLS v0 graphs</h4>
           <p>
-            Check advisory callers and callees when graph support is available —
-            useful navigation context, not sole blast-radius authority.
+            The same nine languages expose qualified direct-call navigation. When
+            receiver dispatch, build context, visibility, or target identity is not
+            proved, Satori abstains instead of inventing an edge.
           </p>
         </article>
         <article class="card">
-          <h4>Freshness warnings</h4>
+          <h4>Atomic Publications</h4>
           <p>
-            Detect stale context before an agent relies on old repo state.
+            Search data, symbols, structural evidence, and relationships become visible
+            together. Incomplete staging state is never the current read authority.
           </p>
         </article>
         <article class="card">
-          <h4>Recovery guidance</h4>
+          <h4>Shared offline runtime</h4>
           <p>
-            Return clear next steps when an index is stale, partial, or not ready.
+            On the default managed Potion + LanceDB path, compatible clients can reuse
+            one resident runtime and the same Publication instead of rebuilding repository
+            state per agent process.
           </p>
         </article>
       </div>
@@ -1726,13 +1731,14 @@ npx -y @zokizuan/satori-cli@latest doctor</code></pre>
     <section class="section" id="quickstart">
       <h3>Try It on One Repo</h3>
       <p class="section-intro">
-        Install the MCP server, check provider and vector-store setup, then give
-        your agent context before the first edit.
+        Install Satori, build the first Publication, and give your agent local
+        repository intelligence before the first edit. Fresh installs default to
+        Potion embeddings and LanceDB, so the standard path needs no API key.
       </p>
       <div class="install-strip">
         <div class="install-top">
           <div class="install-title">Install supported clients</div>
-          <div class="install-note">Provider and client-specific setup lives in the Docs.</div>
+          <div class="install-note">Current packaged runtime target: Linux x64. Client-specific setup lives in the Docs.</div>
         </div>
         <pre><code>npx -y @zokizuan/satori-cli@latest install --client all
 npx -y @zokizuan/satori-cli@latest doctor</code></pre>
@@ -1750,7 +1756,7 @@ npx -y @zokizuan/satori-cli@latest doctor</code></pre>
           </div>
           <div class="step">
             <strong>3. Open evidence</strong>
-            <p>Read the returned symbol, line range, or file outline.</p>
+            <p>Use the returned owner symbol, bounded source read, or file outline.</p>
           </div>
           <div class="step">
             <strong>4. Check related paths</strong>
@@ -1765,10 +1771,11 @@ npx -y @zokizuan/satori-cli@latest doctor</code></pre>
     </section>
 
     <section class="section">
-      <h3>Open Source and Available Today</h3>
+      <h3>Product Surface Available Today</h3>
       <p class="section-intro">
-        Satori is usable today: public source, published packages, supported client
-        setup, and a small MCP surface agents can actually follow.
+        The current product is local-first and packaged as a coordinated Core, MCP,
+        and CLI release. It exposes seven tools over one Publication model rather
+        than making each client assemble repository state independently.
       </p>
       <div class="grid">
         <article class="card">
@@ -1792,37 +1799,38 @@ npx -y @zokizuan/satori-cli@latest doctor</code></pre>
           </p>
         </article>
         <article class="card">
-          <h4>Vector storage</h4>
+          <h4>Local by default</h4>
           <p>
-            Supports Milvus-compatible vector storage today; embedded local
-            vector storage is planned.
+            Fresh installs use Potion embeddings and LanceDB locally. Advanced
+            deployments can override the default storage/runtime configuration.
           </p>
         </article>
         <article class="card">
-          <h4>Embedding providers</h4>
+          <h4>Nine graph-ready languages</h4>
           <p>
-            Supports OpenAI, VoyageAI, Gemini, and Ollama embeddings through
-            runtime configuration.
+            TypeScript, JavaScript, Python, Go, Java, C#, C++, Rust, and Scala
+            ship production symbols plus conservative CALLS v0 navigation.
           </p>
         </article>
         <article class="card">
-          <h4>Six MCP tools</h4>
+          <h4>Seven MCP tools</h4>
           <p>
-            Small by design: index status, search, outlines, reads, graph context,
-            and index management.
+            <code>manage_index</code>, <code>search_codebase</code>,
+            <code>continue_search</code>, <code>call_graph</code>, <code>file_outline</code>,
+            <code>read_file</code>, and <code>list_codebases</code> cover the agent workflow.
           </p>
         </article>
       </div>
     </section>
 
     <section class="section">
-      <h3>Toward Easier Local and Team Workflows</h3>
+      <h3>Designed to Stay Local, Fast, and Coherent</h3>
       <p class="section-intro">
-        Satori is self-hosted today, with Ollama available for local embeddings
-        and Milvus-compatible vector storage required for indexing. Next work
-        focuses on making setup lighter: embedded vector storage such as Zvec,
-        stronger retrieval quality, broader relationship-backed navigation, and
-        shared repo context for teams.
+        The default runtime already keeps embeddings and vector search local. The
+        architecture is built around immutable Publications, bounded freshness
+        checks, and a shared managed runtime so retrieval can stay fast without
+        trading away consistency. Future work can deepen language semantics and
+        team workflows without changing that core contract.
       </p>
       <div class="section-actions">
         <a class="btn primary" href="https://github.com/ham-zax/satori" target="_blank" rel="noopener noreferrer">Follow GitHub</a>
@@ -1849,7 +1857,8 @@ npx -y @zokizuan/satori-cli@latest doctor</code></pre>
         <article class="card">
           <h4>Architecture</h4>
           <p>
-            Indexing, retrieval, freshness, sidecars, ranking, and lifecycle states.
+            Publications, retrieval, freshness, language intelligence, call graphs,
+            ranking, and managed runtime behavior.
           </p>
           <div class="section-actions">
             <a class="btn secondary" href="architecture.html">Open architecture</a>
@@ -1933,7 +1942,7 @@ npx -y @zokizuan/satori-cli@latest doctor</code></pre>
       <div class="footer-col">
         <img class="footer-brand-logo" src="logo-mark.svg" alt="Satori logo" width="39" height="40" />
         <h5>Satori</h5>
-        <p>A structured codebase map for AI coding agents before they edit.</p>
+        <p>Fast local repository intelligence for coding agents before they edit.</p>
       </div>
       <div class="footer-col">
         <h5>Resources</h5>
@@ -1951,7 +1960,7 @@ npx -y @zokizuan/satori-cli@latest doctor</code></pre>
       </div>
       <div class="footer-bottom">
         <span>&copy; 2026 Satori. AGPL-3.0-only.</span>
-        <span>Start free when provider allowances fit your usage; limits can change.</span>
+        <span>Local-first by default with Potion embeddings and LanceDB.</span>
       </div>
     </footer>
   </div>

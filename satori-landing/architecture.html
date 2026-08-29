@@ -4,30 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="logo.svg" />
-    <title>Satori Architecture | Deterministic MCP Code Retrieval System</title>
+    <title>Satori Architecture | Atomic Publications and Local Repository Intelligence</title>
     <meta
       name="description"
-      content="How Satori works under the hood: installer-owned MCP startup, six deterministic tools, freshness gates, vector search, symbol registry and relationship sidecars, snapshots, and sync safety."
+      content="How Satori combines a seven-tool MCP surface, local retrieval, symbol intelligence, conservative call graphs, atomic Publications, freshness gates, and a shared managed runtime."
     />
-    <meta name="keywords" content="Satori architecture, MCP server architecture, semantic code search architecture, symbol registry, relationship sidecar, relationship-backed call graph, repo indexing, vector search, Milvus, Zilliz" />
+    <meta name="keywords" content="Satori architecture, MCP server architecture, repository intelligence, semantic code search, symbol registry, call graph, atomic publication, repo indexing, LanceDB" />
     <meta name="robots" content="index,follow" />
     <link rel="canonical" href="https://satori.hamza.my.id/architecture" />
-    <meta property="og:title" content="Satori Architecture | Deterministic MCP Code Retrieval" />
-    <meta property="og:description" content="Understand Satori's seven-tool MCP runtime, installer-owned startup, freshness gates, vector search, symbol registry and relationship sidecars, snapshots, and sync safety." />
+    <meta property="og:title" content="Satori Architecture | Atomic Local Repository Intelligence" />
+    <meta property="og:description" content="Understand Satori's seven-tool MCP runtime, local retrieval, atomic Publications, production symbol intelligence, qualified CALLS v0 graphs, and freshness safety." />
     <meta property="og:type" content="article" />
     <meta property="og:url" content="https://satori.hamza.my.id/architecture" />
     <meta property="og:site_name" content="Satori" />
     <meta property="og:image" content="https://satori.hamza.my.id/og-image.svg" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Satori Architecture | Deterministic MCP Code Retrieval" />
-    <meta name="twitter:description" content="Installer-owned MCP startup, six deterministic tools, freshness gates, vector search, symbol registry and relationship sidecars, snapshots, and sync safety." />
+    <meta name="twitter:title" content="Satori Architecture | Atomic Local Repository Intelligence" />
+    <meta name="twitter:description" content="Seven MCP tools over local retrieval, atomic Publications, production symbols, conservative call graphs, and freshness-safe reads." />
     <meta name="twitter:image" content="https://satori.hamza.my.id/og-image.svg" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "TechArticle",
         "headline": "Satori Architecture",
-        "description": "Architecture notes for Satori's installer-owned MCP startup, fixed seven-tool surface, freshness gates, vector retrieval, symbol registry and relationship sidecars, snapshot state, and sync safety.",
+        "description": "Architecture notes for Satori's fixed seven-tool MCP surface, local retrieval, atomic Publications, language intelligence, qualified call graphs, freshness gates, and shared managed runtime.",
         "url": "https://satori.hamza.my.id/architecture",
         "author": {
           "@type": "Person",
@@ -1057,16 +1057,17 @@
       <section class="hero">
         <h1>Satori Architecture</h1>
         <p>
-          How Satori gives MCP coding agents symbol-owned repo search, exact
-          reads, bounded graph context, and freshness checks without hiding
-          state or failures.
+          Satori serves one coherent repository generation at a time. Semantic
+          retrieval, symbols, structural analysis, relationship evidence, and
+          freshness metadata are published atomically and read through a small
+          MCP surface that fails closed when authority is missing.
         </p>
         <div class="trust-chips" role="list" aria-label="Satori architecture layers">
-          <span class="trust-chip" role="listitem">MCP runtime</span>
-          <span class="trust-chip" role="listitem">Vector search</span>
-          <span class="trust-chip" role="listitem">Symbol registry</span>
-          <span class="trust-chip" role="listitem">Relationship sidecar</span>
-          <span class="trust-chip" role="listitem">Snapshot state</span>
+          <span class="trust-chip" role="listitem">Seven MCP tools</span>
+          <span class="trust-chip" role="listitem">Potion + LanceDB default</span>
+          <span class="trust-chip" role="listitem">Atomic Publications</span>
+          <span class="trust-chip" role="listitem">Nine CALLS v0 languages</span>
+          <span class="trust-chip" role="listitem">Fail-closed navigation</span>
         </div>
       </section>
 
@@ -1074,8 +1075,10 @@
         <h2>System Overview</h2>
         <p class="intro">
           Agent requests route through a fixed seven-tool registry. The MCP
-          runtime enforces freshness/fingerprint gates and orchestrates search.
-          Core sync provides deterministic file-state truth for indexing.
+          runtime acquires the current Publication, validates freshness, and
+          keeps each request pinned to that immutable generation. Indexing builds
+          the next Publication off to the side and swaps it into authority only
+          after its search, symbol, structural, and relationship state is complete.
         </p>
         <div class="diagram-wrap">
 
@@ -1128,7 +1131,7 @@
               <g transform="translate(300, 130)">
                 <rect width="200" height="70" rx="8" fill="rgba(255, 255, 255, 0.05)" stroke="rgba(255, 255, 255, 0.2)" stroke-width="1" stroke-dasharray="4 4" />
                 <text x="100" y="30" fill="#fff" font-family="sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Tool Registry</text>
-                <text x="100" y="50" fill="rgba(255,255,255,0.6)" font-family="sans-serif" font-size="12" text-anchor="middle">(6 MCP Tools)</text>
+                <text x="100" y="50" fill="rgba(255,255,255,0.6)" font-family="sans-serif" font-size="12" text-anchor="middle">(7 MCP Tools)</text>
               </g>
 
               <!-- MCP Runtime -->
@@ -1143,15 +1146,15 @@
               <!-- Vector Store -->
               <g transform="translate(100, 420)">
                 <rect width="180" height="70" rx="8" fill="url(#grad-store)" stroke="rgba(138, 43, 226, 0.5)" stroke-width="2" />
-                <text x="90" y="30" fill="#fff" font-family="sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Vector Store</text>
-                <text x="90" y="50" fill="rgba(255,255,255,0.6)" font-family="sans-serif" font-size="12" text-anchor="middle">Zilliz / Milvus</text>
+                <text x="90" y="30" fill="#fff" font-family="sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Local Retrieval</text>
+                <text x="90" y="50" fill="rgba(255,255,255,0.6)" font-family="sans-serif" font-size="12" text-anchor="middle">Potion / LanceDB</text>
               </g>
 
-              <!-- Sidecar -->
+              <!-- Publication -->
               <g transform="translate(310, 420)">
                 <rect width="180" height="70" rx="8" fill="url(#grad-store)" stroke="rgba(138, 43, 226, 0.5)" stroke-width="2" />
-                <text x="90" y="30" fill="#fff" font-family="sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Navigation Sidecars</text>
-                <text x="90" y="50" fill="rgba(255,255,255,0.6)" font-family="sans-serif" font-size="12" text-anchor="middle">Symbols / Relationships</text>
+                <text x="90" y="30" fill="#fff" font-family="sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Publication</text>
+                <text x="90" y="50" fill="rgba(255,255,255,0.6)" font-family="sans-serif" font-size="12" text-anchor="middle">Search / Symbols / Graph</text>
               </g>
 
               <!-- Core -->
@@ -1178,8 +1181,8 @@
             <p>Coordinates indexing, search, sync, freshness, and lifecycle state.</p>
           </article>
           <article class="card">
-            <h3>Storage</h3>
-            <p>Vector store, symbol registry, relationship sidecars, local snapshots, and Merkle state.</p>
+            <h3>Publication Store</h3>
+            <p>Owns the current immutable generation: search state, symbols, structural evidence, relationships, manifest, and freshness identity.</p>
           </article>
         </div>
         <div class="grid-3 layer-grid">
@@ -1208,7 +1211,7 @@
               <li>Runtime snapshot state and lifecycle status.</li>
               <li>Index freshness, fingerprint gates, and recovery guidance.</li>
               <li>Agent-safe responses, warnings, and refusal paths.</li>
-              <li>Coordination across vector store, navigation sidecars, and core engine.</li>
+              <li>Coordination across the current Publication, local retrieval, and core engine.</li>
             </ul>
           </article>
           <article class="card runtime-card runtime-core">
@@ -1217,7 +1220,7 @@
               <li>Stat-first sync, hash-on-change, and deterministic Merkle roots.</li>
               <li>Path normalization and snapshot diff primitives.</li>
               <li>Partial-scan safety for unreadable files and directories.</li>
-              <li>AST-aware chunking, symbol ownership, relationship sidecars, and ignore filtering.</li>
+              <li>AST-aware chunking, symbol ownership, structural evidence, relationship construction, and ignore filtering.</li>
               <li>Low-level indexing/search primitives behind MCP orchestration.</li>
             </ul>
           </article>
@@ -1261,49 +1264,50 @@
       <section class="section">
         <h2>Agent-Safe Tool Surface</h2>
         <p class="intro">
-          Satori exposes seven MCP tools. The point is not a large API; it is a
-          small set of operations that return state, warnings, and next steps
-          when context is unsafe. The MCP server does not expose source-code
-          write tools.
+          Satori exposes exactly seven public MCP tools. They cover repository
+          discovery, lifecycle, search/pagination, structural navigation, bounded
+          source reads, and call-graph context. Every tool is read-only with
+          respect to source code; only index state is mutable through
+          <code>manage_index</code>.
         </p>
         <div class="grid-3">
           <article class="tool-group">
-            <div class="tool-group-title">Discovery</div>
+            <div class="tool-group-title">Discovery and Retrieval</div>
             <div class="tool-list">
               <div class="tool-card">
                 <h3><code>list_codebases</code></h3>
-                <p>Lists tracked roots grouped by ready, indexing, failed, or requires-reindex state.</p>
-                <p class="refusal">Refuses to flatten state into a single success/failure bit.</p>
+                <p>Lists known indexed repositories with readiness and live runtime-owner state.</p>
+                <p class="refusal">Does not flatten incompatible or in-progress repositories into a false “ready” state.</p>
               </div>
               <div class="tool-card">
                 <h3><code>search_codebase</code></h3>
-                <p>Finds relevant code from plain-English behavior queries, exact identifier lookup, symbol-owned grouping, freshness checks, recommended actions, structured warnings, and navigation hints.</p>
-                <p class="refusal">Refuses stale or unsafe context when index gates require attention.</p>
+                <p>Runs freshness-aware hybrid search, exact/lexical recovery, symbol-owned grouping, filters, and optional debug modes.</p>
+                <p class="refusal">Refuses to serve an incompatible Publication as current evidence.</p>
               </div>
               <div class="tool-card">
                 <h3><code>continue_search</code></h3>
-                <p>Reveals more groups from one frozen search ordering without new embedding, retrieval, or reranking work; exact offset retries replay the same page.</p>
-                <p class="refusal">Refuses expired, stale, unavailable, or conflicting handles.</p>
+                <p>Reveals more of one frozen grouped result set without rerunning embedding, retrieval, or reranking.</p>
+                <p class="refusal">Expired, stale, conflicting, or authority-drifted handles fail closed.</p>
               </div>
             </div>
           </article>
           <article class="tool-group">
-            <div class="tool-group-title">Inspection</div>
+            <div class="tool-group-title">Navigation and Evidence</div>
             <div class="tool-list">
               <div class="tool-card">
                 <h3><code>file_outline</code></h3>
-                <p>Maps symbols in a file and resolves exact labels or IDs through sidecar metadata.</p>
-                <p class="refusal">Refuses to guess when exact symbol resolution is ambiguous.</p>
-              </div>
-              <div class="tool-card">
-                <h3><code>call_graph</code></h3>
-                <p>Traverses callers and callees from a search-provided <code>symbolRef</code>.</p>
-                <p class="refusal">Refuses to fake graph data when the sidecar is absent or not ready.</p>
+                <p>Returns Publication-owned symbols, ownership, spans, and supported structural analysis for one file.</p>
+                <p class="refusal">Exact symbol resolution reports ambiguity instead of selecting a same-name guess.</p>
               </div>
               <div class="tool-card">
                 <h3><code>read_file</code></h3>
-                <p>Reads files, line ranges, or exact symbols with optional annotated outline status.</p>
-                <p class="refusal">Refuses unlimited context dumps; large reads are bounded.</p>
+                <p>Reads bounded source windows or opens one exact indexed symbol through current-source symbol resolution.</p>
+                <p class="refusal">It is restricted to tracked searchable roots and is not a general host-filesystem reader.</p>
+              </div>
+              <div class="tool-card">
+                <h3><code>call_graph</code></h3>
+                <p>Traverses bounded caller/callee relationship context and supported test references for an exact symbol reference.</p>
+                <p class="refusal">Unsupported dispatch or missing relationship authority returns a capability/readiness fallback rather than a fabricated edge.</p>
               </div>
             </div>
           </article>
@@ -1312,8 +1316,8 @@
             <div class="tool-list">
               <div class="tool-card">
                 <h3><code>manage_index</code></h3>
-                <p>Creates, syncs, reindexes, checks status, repairs local readiness when proof matches, clears, and handles force-reindex recovery paths. Create and reindex return after kickoff; status exposes the durable operation phase through completion.</p>
-                <p class="refusal">Refuses destructive ambiguity: clear is explicit, repair does not invent proof, backend timeouts preserve local state, and mixed live runtime owners block mutation.</p>
+                <p>Supports create, sync, status, reindex, and clear while preserving atomic Publication activation.</p>
+                <p class="refusal">Incomplete staging never becomes current; destructive actions stay explicit and incompatible live runtime owners block unsafe mutation.</p>
               </div>
             </div>
           </article>
@@ -1321,48 +1325,44 @@
       </section>
 
       <section class="section">
-        <h2>Navigation Sidecars</h2>
+        <h2>Publication-Owned Navigation</h2>
         <p class="intro">
-          Satori separates retrieval from navigation. The vector store finds
-          candidate evidence; the symbol registry and relationship sidecar
-          explain what that evidence belongs to.
+          Retrieval and navigation are different evidence layers, but they share
+          one authority. A Publication binds the search snapshot, symbol registry,
+          structural analysis, relationship evidence, manifest, and freshness
+          identity into one immutable generation.
         </p>
         <div class="grid-2">
           <article class="card">
-            <h3>Symbol Registry</h3>
+            <h3>Atomic Visibility</h3>
             <p>
-              Files remain the source of truth. The registry is a derived view
-              for one compatible indexed snapshot, with owner symbol keys,
-              exact symbol instances, file-owner fallbacks, and outline records.
+              Indexing builds staged state without disturbing readers. Only a
+              complete generation is promoted to current, so a request cannot mix
+              new vectors with an old symbol graph or vice versa.
             </p>
           </article>
           <article class="card">
-            <h3>Relationship Sidecar</h3>
+            <h3>Publication Leases</h3>
             <p>
-              The current sidecar stores conservative <code>CALLS v0</code>
-              edges plus TS/JS relative <code>IMPORTS</code> and
-              <code>EXPORTS v0</code> edges. Ambiguous same-name targets are
-              skipped rather than guessed.
+              A read acquires the current Publication and keeps that exact
+              generation pinned for the request. Concurrent publication changes do
+              not mutate the evidence underneath an in-flight tool call.
             </p>
           </article>
           <article class="card">
-            <h3>Search Contract</h3>
+            <h3>Symbol Authority</h3>
             <p>
-              <code>search_codebase</code> returns exact registry hits or
-              symbols in grouped mode with action guidance, capability
-              confidence, structured warnings, and fallbacks. Matching chunks
-              are evidence for those symbols, not the final unit the agent
-              should edit from.
+              Matching chunks are retrieval evidence. Navigation resolves them to
+              exact symbol instances and source spans before exposing symbol-owned
+              actions to the agent.
             </p>
           </article>
           <article class="card">
-            <h3>Graph Boundary</h3>
+            <h3>Relationship Authority</h3>
             <p>
-              <code>call_graph</code> now traverses compatible relationship
-              sidecars directly. JSON sidecars remain canonical; SQLite is an
-              additive cache for validation or explicit experimental reads and
-              can serve only after parity with JSON registry and relationship
-              sidecars is proven.
+              CALLS edges are published only when the language-specific strategy
+              proves the target within its public capability boundary. Ambiguity,
+              unsupported receiver dispatch, and unproved build context abstain.
             </p>
           </article>
         </div>
@@ -1507,14 +1507,14 @@
       </section>
 
       <section class="section">
-        <h2>Search And Sync Behavior</h2>
+        <h2>Retrieval, Language Intelligence, and Freshness</h2>
         <p class="intro">
-          The behavior below is shown directly because it is the core trust
-          model: search is freshness-aware, sync is incremental, and cloud
-          lifecycle operations are verified before local state is discarded.
+          The trust model is simple: retrieve locally, resolve evidence through
+          the current Publication, expose only language capabilities that are
+          actually qualified, and refuse stale or incomplete authority.
         </p>
         <div class="pipeline-line">
-          Plain-English query -> semantic search -> owner symbol -> exact reads -> freshness check -> agent guidance
+          query -> local retrieval -> owner symbol -> qualified relationships -> Publication freshness -> agent guidance
         </div>
         <div class="grid-2">
           <article class="card">
@@ -1543,11 +1543,11 @@
           <article class="card">
             <h3>Language Capabilities</h3>
             <p>
-              TypeScript, JavaScript, and Python provide production-ready
-              <code>CALLS v0</code> navigation. C++, C#, Go, Java, Rust, and
-              Scala are <code>symbol_only</code>: compatible registries power
-              ownership, outlines, and exact opens, while graph traversal
-              returns <code>unsupported_language</code>.
+              TypeScript, JavaScript, Python, Go, Java, C#, C++, Rust, and Scala
+              ship production symbols plus <code>CALLS v0</code>. The backend is
+              language-specific: OXC/Satori syntactic for JS/TS, Python-native
+              Satori resolution, CBM semantic resolution for Go/Java/C#/C++/Rust,
+              and Satori syntactic direct-call resolution for Scala.
             </p>
           </article>
           <article class="card">
@@ -1583,30 +1583,27 @@
             </p>
           </article>
           <article class="card">
-            <h3>Incremental Sync</h3>
+            <h3>Publication Rebuilds</h3>
             <p>
-              Stat-first scan, hash-on-change, deterministic Merkle root, and
-              changed-file chunk updates. Navigation reuses changed-file symbol
-              output, preserves unchanged registry state, and recomputes
-              relationships globally without re-splitting unchanged files.
+              Stat-first scanning and hash-on-change keep source discovery bounded.
+              Indexing assembles the next complete search/symbol/relationship
+              generation in staging, then atomically publishes it when ready.
             </p>
           </article>
           <article class="card">
             <h3>Fail-Closed Navigation</h3>
             <p>
-              Missing, stale, incompatible, partial, or recovery-failed
-              navigation does not publish fake graph truth. Public tools return
-              precise reasons such as <code>missing_symbol_registry</code>,
-              <code>missing_relationship_sidecar</code>, or
-              <code>partial_index_navigation_unavailable</code>.
+              Missing, stale, incompatible, ambiguous, or unsupported navigation
+              never becomes guessed graph truth. Public tools return explicit
+              capability/readiness outcomes and keep callers/callees advisory.
             </p>
           </article>
           <article class="card">
-            <h3>Provider Behavior</h3>
+            <h3>Local Default</h3>
             <p>
-              Cloud and local providers use different result budgets. Rerank
-              is capability-driven, docs scope skips rerank, and failures
-              degrade with warnings.
+              Fresh installs use Potion embeddings and LanceDB without an API key.
+              Advanced provider/storage overrides remain configuration choices;
+              the Publication contract is independent of that choice.
             </p>
           </article>
           <article class="card">
@@ -1626,27 +1623,27 @@
             </p>
           </article>
           <article class="card">
-            <h3>No Passive Cloud Repair</h3>
+            <h3>No Reconstructed Progress</h3>
             <p>
-              Remote collection existence is not readiness proof. Missing or
-              incompatible local readiness is recovered only through explicit
-              create or reindex flows with matching completion proof.
+              Active indexing progress belongs to the live runtime. After a restart,
+              status reports durable current Publication state rather than inventing
+              a process history that no longer exists.
             </p>
           </article>
           <article class="card">
-            <h3>Backend Timeouts</h3>
+            <h3>Shared Offline Runtime</h3>
             <p>
-              Indeterminate Milvus or Zilliz validation and delete timeouts are
-              returned as backend state, not as repo failure. Local state is
-              preserved unless remote absence is verified.
+              The managed offline Potion + LanceDB path can share one resident runtime
+              across compatible clients for the same state root. Mutation is blocked
+              when live ownership would make Publication authority ambiguous.
             </p>
           </article>
           <article class="card">
-            <h3>Verified Delete</h3>
+            <h3>Explicit Clear</h3>
             <p>
-              Clear and force-reindex mutate local snapshot/Merkle state only
-              after remote deletion is verified or the collection is already
-              absent.
+              Repository state removal is an explicit <code>manage_index</code>
+              action. Ordinary reads never mutate source files or silently repair
+              incompatible index state.
             </p>
           </article>
         </div>
@@ -1664,16 +1661,16 @@
             <p><code>search_codebase</code> returns ranked behavior matches or exact identifier hits with freshness state, <code>recommendedNextAction</code>, capability confidence, and navigation hints.</p>
           </div>
           <div class="flow-step">
-            <strong>Agent opens the exact symbol</strong>
-            <p><code>file_outline</code> and <code>read_file.open_symbol</code> resolve the implementation span from <code>symbolInstanceId</code> without guessing.</p>
+            <strong>Agent resolves and reads the exact owner</strong>
+            <p><code>file_outline</code> resolves symbol ownership and <code>read_file</code> opens the exact indexed symbol or a bounded source span from the same Publication.</p>
           </div>
           <div class="flow-step">
             <strong>Agent checks callers and callees</strong>
-            <p><code>call_graph</code> provides nearby dependency context from compatible relationship sidecars.</p>
+            <p><code>call_graph</code> traverses the caller/callee directions supported by relationship evidence qualified for that language and Publication.</p>
           </div>
           <div class="flow-step">
             <strong>Agent handles unsafe state explicitly</strong>
-            <p>Requires-reindex, missing registry or relationship sidecar, noisy results, and backend timeout states return recovery guidance.</p>
+            <p>Stale Publications, unsupported call semantics, ambiguous targets, and incomplete indexing return explicit readiness or capability guidance.</p>
           </div>
           <div class="flow-step">
             <strong>Agent edits with verified context</strong>
@@ -1688,7 +1685,7 @@
         <div class="footer-col">
           <img class="footer-brand-logo" src="logo-mark.svg" alt="Satori logo" width="39" height="40" />
           <h5>Satori</h5>
-          <p>Repo context for AI coding agents. Investigate real codebases before editing.</p>
+          <p>Fast local repository intelligence for coding agents before they edit.</p>
         </div>
         <div class="footer-col">
           <h5>Resources</h5>

@@ -21,6 +21,18 @@ Satori is built for the part of coding-agent work that should be fast, repeatabl
 
 Satori is not another code editor or autonomous patcher. It is the repository intelligence product an agent consults before it changes code.
 
+## Documentation
+
+Start with the current product docs rather than dated implementation plans:
+
+- [`docs/README.md`](./docs/README.md) — current-vs-historical documentation map.
+- [`docs/architecture/LANGUAGE_INTELLIGENCE.md`](./docs/architecture/LANGUAGE_INTELLIGENCE.md) — current language backends, capability boundaries, and relationship architecture.
+- [`docs/RELEASING.md`](./docs/RELEASING.md) — release qualification, npm authentication, publication, and registry verification.
+- [`satori-landing/docs/index.html`](./satori-landing/docs/index.html) — end-user operational reference for the seven MCP tools.
+- [`satori-landing/architecture.html`](./satori-landing/architecture.html) — public architecture overview for Publications, local retrieval, and call navigation.
+
+Files under `docs/plans/`, `docs/research/`, `docs/remediation/`, and `docs/superpowers/agent-plans/` are historical engineering records unless a current document explicitly points to them as an active specification.
+
 ## Install
 
 Requirements: Node.js 22.13+, Linux x64 (native Linux or WSL2), and at least

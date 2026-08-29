@@ -4,30 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="../logo.svg" />
-    <title>Satori Docs | Repo Context for AI Coding Agents</title>
+    <title>Satori Docs | Local Repository Intelligence for Coding Agents</title>
     <meta
       name="description"
-      content="Satori documentation for installer-first MCP setup, provider configuration, repo indexing, semantic code search, symbol navigation, call graph context, warnings, and troubleshooting."
+      content="Current Satori documentation: install the managed MCP runtime, build atomic Publications, search locally, navigate exact symbols and qualified call graphs, and operate the seven-tool surface safely."
     />
     <meta name="keywords" content="Satori docs, MCP install, AI coding agent documentation, semantic code search docs, repo indexing, call graph, code navigation" />
     <meta name="robots" content="index,follow" />
     <link rel="canonical" href="https://satori.hamza.my.id/docs/" />
-    <meta property="og:title" content="Satori Docs | Repo Context for AI Coding Agents" />
-    <meta property="og:description" content="Install Satori, configure providers, index a repo, search code, open exact symbols, follow call graph context, and troubleshoot lifecycle states." />
+    <meta property="og:title" content="Satori Docs | Local Repository Intelligence for Coding Agents" />
+    <meta property="og:description" content="Install Satori, build a Publication, search locally, resolve exact symbols, traverse qualified callers/callees, and manage freshness through seven MCP tools." />
     <meta property="og:type" content="article" />
     <meta property="og:url" content="https://satori.hamza.my.id/docs/" />
     <meta property="og:site_name" content="Satori" />
     <meta property="og:image" content="https://satori.hamza.my.id/og-image.svg" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Satori Docs | Repo Context for AI Coding Agents" />
-    <meta name="twitter:description" content="Installer-first setup, provider config, repo indexing, exact symbol navigation, call graph context, and troubleshooting for Satori." />
+    <meta name="twitter:title" content="Satori Docs | Local Repository Intelligence for Coding Agents" />
+    <meta name="twitter:description" content="Installer-first setup, Potion + LanceDB local defaults, atomic Publications, exact symbols, qualified call graphs, and seven MCP tools." />
     <meta name="twitter:image" content="https://satori.hamza.my.id/og-image.svg" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "TechArticle",
         "headline": "Satori Docs",
-        "description": "Installer-first documentation for Satori MCP setup, provider configuration, repo indexing, semantic search, symbol navigation, call graph context, warnings, and troubleshooting.",
+        "description": "Current documentation for Satori's managed MCP runtime, local retrieval defaults, atomic Publications, semantic search, symbol navigation, qualified call graphs, lifecycle operations, and troubleshooting.",
         "url": "https://satori.hamza.my.id/docs/",
         "author": {
           "@type": "Person",
@@ -653,20 +653,22 @@
 
       <main id="main">
       <section class="hero">
-        <div class="eyebrow">Operational documentation</div>
+        <div class="eyebrow">Current product documentation</div>
         <h1>Satori Docs</h1>
         <p class="hero-copy">
-          Satori helps coding agents investigate real repos before editing:
-          intent search, file outlines, exact reads, caller/callee context when
-          supported, freshness checks, and recovery steps when context is stale.
+          Satori is a local-first repository intelligence layer for MCP coding
+          agents. This page documents the current seven-tool surface, atomic
+          Publication lifecycle, local Potion + LanceDB defaults, production
+          symbol navigation, and conservative CALLS v0 behavior.
         </p>
         <nav class="quick-links" aria-label="Docs sections">
           <a href="#install">Install</a>
           <a href="#repo-config">Repo Config</a>
           <a href="#setup">Setup</a>
           <a href="#first-index">First Index</a>
-          <a href="#tools">Tools</a>
-          <a href="#lifecycle">Lifecycle</a>
+          <a href="#language-intelligence">Languages</a>
+          <a href="#tools">Seven Tools</a>
+          <a href="#lifecycle">Publications</a>
           <a href="#warnings">Warnings</a>
           <a href="#troubleshooting">Troubleshooting</a>
           <a href="#boundaries">Boundaries</a>
@@ -976,17 +978,18 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
       <section class="section" id="first-index">
         <h2>Index the First Repo</h2>
         <p class="lede">
-          Satori only returns repo context after a codebase has been indexed.
+          Satori serves repository intelligence from a completed Publication.
           Start with one absolute repository path (relative paths are rejected),
-          confirm it appears in the codebase list, then search with runtime-first
-          defaults.
+          create the first Publication, confirm readiness with status, then search
+          with runtime-first defaults.
         </p>
         <div class="workflow">
           <div class="step">
             <strong>1 Connect</strong>
             <p>
-              Run <code>list_codebases</code> in your MCP client to verify the
-              server starts and can see its local state.
+              Run <code>manage_index action="status" path="/absolute/path/to/repo"</code>
+              to verify the MCP runtime starts and to inspect whether a current
+              Publication already exists.
             </p>
           </div>
           <div class="step">
@@ -1015,10 +1018,12 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
             </p>
           </div>
           <div class="step">
-            <strong>4 Navigate</strong>
+            <strong>4 Navigate and read</strong>
             <p>
-              Use <code>file_outline</code>, <code>call_graph</code>, and
-              <code>read_file</code> to lock exact spans before editing.
+              Use <code>file_outline</code> to lock the owner symbol, then
+              <code>read_file</code> to open that exact indexed symbol or a bounded
+              source window. Use <code>call_graph</code> when relationship evidence
+              is qualified for that symbol.
             </p>
           </div>
         </div>
@@ -1028,9 +1033,9 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
         <h2>Search Workflow</h2>
         <p class="lede">
           The default agent path starts with plain-English discovery, then
-          narrows to exact code evidence. Search points to the next useful step:
-          inspect an outline, open a symbol, read a line range, or check
-          caller/callee context when supported.
+          narrows to exact structural evidence. Search points to the next useful
+          step: inspect an outline, resolve a symbol location, or check qualified
+          caller/callee context before the agent reads or edits source in its host.
         </p>
         <div class="workflow">
           <div class="step">
@@ -1061,13 +1066,12 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
             </p>
           </div>
           <div class="step">
-            <strong>4 Read</strong>
+            <strong>4 Read exact evidence</strong>
             <p>
-              Use <code>read_file</code> with <code>open_symbol</code> or the
-              returned navigation fallback. Use result fallbacks when graph
-              context is unsupported. Ordinary file reads use the configured
-              line bound and return continuation hints; an exact symbol request
-              returns the exact span resolved by <code>file_outline</code>.
+              Use <code>read_file</code> with the exact indexed symbol returned by
+              navigation, or request a bounded source window. If graph traversal
+              abstains, use the returned fallback plus scoped search rather than
+              treating an unsupported relationship as missing code.
             </p>
           </div>
         </div>
@@ -1089,7 +1093,7 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
         </div>
       </section>
 
-      <section class="section" id="navigation-sidecars">
+      <section class="section" id="language-intelligence">
         <h2>Publication-Owned Navigation</h2>
         <p class="lede">
           Each completed Publication owns one immutable JSON navigation tree
@@ -1162,107 +1166,105 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
       <section class="section" id="tools">
         <h2>Seven Tools</h2>
         <p class="lede">
-          Satori keeps the public MCP surface small. The tools move an agent
-          from repo discovery to exact evidence without adding edit commands.
+          The live MCP registry exposes exactly seven tools. Together they cover
+          repository discovery, lifecycle, search/pagination, structural
+          navigation, bounded source reads, and call-graph context without adding
+          source-code write commands.
         </p>
         <div class="tool-grid">
           <div class="panel">
             <h3>list_codebases</h3>
             <p>
-              Lists indexed repositories in deterministic buckets: ready,
-              indexing, requires reindex, and failed.
+              Lists known indexed repositories with readiness and runtime-owner
+              state so an agent can discover an existing Publication before
+              starting another index operation.
             </p>
           </div>
           <div class="panel">
             <h3>manage_index</h3>
             <p>
-              Creates, syncs, checks status, reindexes, or clears indexes.
-              Create and reindex return a kickoff response; poll status for the
-              current Publication state and any process-lifetime mutation
-              projection still available in this runtime. Status includes health
-              diagnostics when available.
+              Supports <code>create</code>, <code>reindex</code>,
+              <code>sync</code>, <code>status</code>, and <code>clear</code>.
+              Indexing builds a complete staged generation before it becomes the
+              current Publication; status separates durable Publication state from
+              process-lifetime progress.
             </p>
           </div>
           <div class="panel">
             <h3>search_codebase</h3>
             <p>
-              Semantic search with <code>runtime</code>/<code>docs</code>/<code>mixed</code>
-              scopes, path operators, must/exclude filters, grouped output, and
-              debug metadata. Runtime includes source and test evidence (tests
-              demoted unless test intent is explicit); docs is documentation-only;
-              mixed includes all. Search is the freshness-aware read path and
-              returns structured warnings, recommended actions, and navigation
-              fallbacks.
+              Searches by behavior or identifier with <code>runtime</code>,
+              <code>docs</code>, or <code>mixed</code> scope, path operators,
+              filters, owner-symbol grouping, freshness checks, structured
+              warnings, and optional debug modes.
             </p>
           </div>
           <div class="panel">
             <h3>continue_search</h3>
             <p>
-              Returns the next groups from a frozen grouped-search result set
-              without query embedding, retrieval, or reranking. Handles are
-              process-local; callers pass the exact next offset, making an
-              identical retry safe. Expiry or authority drift fails closed.
+              Reveals more groups from one frozen grouped-search result without
+              rerunning embedding, retrieval, or reranking. Exact-offset retries
+              are idempotent; expiry or authority drift fails closed.
             </p>
           </div>
           <div class="panel">
             <h3>file_outline</h3>
             <p>
-              Reads Publication symbol outlines and resolves exact symbols
-              without guessing when matches are ambiguous.
+              Returns the current structural outline for a file. Supported
+              languages expose exact symbol ownership and spans; Python and Go
+              also expose on-demand structural analysis details.
             </p>
           </div>
           <div class="panel">
             <h3>call_graph</h3>
             <p>
-              Traverses caller/callee relationships with depth limits when graph
-              support is ready for the returned symbol reference.
+              Traverses bounded caller/callee relationship context and supported
+              test references from an exact symbol reference. Output follows the
+              language's declared capability boundary.
             </p>
           </div>
           <div class="panel">
             <h3>read_file</h3>
             <p>
-              Reads bounded plain or annotated file windows. Exact symbol
-              opening delegates to outline resolution and returns the resolved
-              symbol span rather than applying the ordinary file-window cap.
+              Reads bounded source windows or opens one exact indexed symbol. It
+              is restricted to tracked searchable roots and is not a general
+              host-filesystem reader.
             </p>
           </div>
         </div>
       </section>
 
       <section class="section" id="lifecycle">
-        <h2>Sync, Reindex, and Clear</h2>
+        <h2>Publication Lifecycle</h2>
         <p class="lede">
-          Lifecycle operations have different meanings. Use sync for ordinary
-          file changes, reindex for runtime or Publication-navigation
-          incompatibility, and clear only when you intentionally want to remove
-          a tracked codebase.
-          Create, reindex, sync, and clear are blocked when another live Satori
-          MCP runtime has a different fingerprint, version, or config identity.
+          <code>manage_index</code> owns the public lifecycle. Use
+          <code>create</code> for the first Publication, <code>sync</code> for
+          ordinary source divergence, <code>reindex</code> when current authority
+          is missing/corrupt/incompatible, <code>status</code> to inspect durable
+          readiness, and <code>clear</code> only for intentional removal. Mutations
+          are blocked when live runtime ownership would make authority ambiguous.
         </p>
         <div class="grid">
           <div class="panel">
             <h3>Sync</h3>
             <p>
-              <code>manage_index action="sync"</code> is the immediate
-              convergence lever after normal file edits or ignore-rule changes.
-              Search also runs freshness checks before returning results.
-              Successful sync reuses changed-file symbol output, preserves
-              unchanged registry state, and recomputes relationships globally
-              without re-splitting unchanged files.
+              <code>manage_index action="sync"</code> converges ordinary source
+              or ignore-rule changes. The replacement generation is assembled in
+              staging and becomes current only after its search, symbol,
+              structural, and relationship state is complete.
             </p>
           </div>
           <div class="panel">
             <h3>Reindex</h3>
             <p>
-              <code>manage_index action="reindex"</code> rebuilds the index.
-              Use it when a tool returns <code>requires_reindex</code> or a
-              reindex hint. Do not substitute sync for fingerprint
-              incompatibility.
+              <code>manage_index action="reindex"</code> creates a fresh
+              Publication when the current generation is absent, corrupt, or
+              incompatible with the running architecture/configuration. Satori
+              does not expose a repair action for retired authority formats.
             </p>
             <p>
-              If changed-file indexing stops early, navigation state is cleared
-              instead of publishing a mixed generation. That fail-closed path is
-              also a reindex signal.
+              A failed build leaves the previous complete Publication in
+              authority when possible; partial staging is never promoted.
             </p>
           </div>
           <div class="panel">
@@ -1276,24 +1278,26 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
           <div class="panel">
             <h3>Status</h3>
             <p>
-              <code>manage_index action="status"</code> answers why a repo is
-              or is not usable right now. It is also the observation path after
-              create or reindex accepts an asynchronous operation.
+              <code>manage_index action="status"</code> is the authoritative
+              readiness view. While the same runtime is alive it can also project
+              active mutation phase/progress/error. Those process-lifetime fields
+              are not reconstructed after restart; durable status then reflects
+              the current Publication that actually exists.
             </p>
             <ul>
-              <li>Index state and remediation reason.</li>
-              <li>Current Publication proof.</li>
-              <li>Current runtime compatibility.</li>
-              <li>Publication navigation readiness and stale-state signals.</li>
-              <li>Watcher state and indexed file/chunk counts.</li>
+              <li>Current Publication/readiness state and remediation reason.</li>
+              <li>Runtime/config compatibility and navigation capability evidence.</li>
+              <li>Source freshness and indexed file/chunk observations.</li>
+              <li>Active mutation metadata only when the owning runtime still has it.</li>
             </ul>
           </div>
           <div class="panel">
-            <h3>Reindex recovery</h3>
+            <h3>Publication safety</h3>
             <p>
-              <code>manage_index action="reindex"</code> rebuilds an index when
-              the current Publication is missing, incompatible, or unprovable.
-              Use <code>action="sync"</code> for ordinary source divergence.
+              Readers acquire a lease on one current immutable Publication for
+              the request. A concurrent sync/reindex may publish a newer
+              generation, but it does not change the evidence underneath an
+              in-flight read.
             </p>
           </div>
         </div>
@@ -1418,16 +1422,15 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
             </p>
           </div>
           <div class="panel">
-            <h3>Missing provider config</h3>
+            <h3>Runtime configuration mismatch</h3>
             <p>
-              If indexing or search returns
+              The default offline Potion + LanceDB install needs no model API key.
+              If a connected or manually overridden runtime returns
               <code>MISSING_PROVIDER_CONFIG</code>, run
-              <code>npx -y @zokizuan/satori-cli@latest doctor</code>, set the
-              missing provider or Milvus values, then retry the same tool call.
-              It is an active setup failure only when it appears as the tool
-              response <code>code</code> or <code>reason</code>; inside
-              <code>search_codebase</code> results it may just be matched code
-              content.
+              <code>npx -y @zokizuan/satori-cli@latest doctor</code>, fix the
+              reported provider/backend values, restart the MCP clients, then retry
+              the original tool call. Inside search results, the same text may simply
+              be matched repository content rather than an active error.
             </p>
           </div>
           <div class="panel">
@@ -1456,19 +1459,20 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
             </p>
           </div>
           <div class="panel">
-            <h3>Backend timeout</h3>
+            <h3>Connected backend timeout</h3>
             <p>
-              If Milvus or Zilliz times out during validation or deletion,
-              Satori returns retryable backend guidance and preserves local state
-              unless remote absence is verified.
+              This applies only to the optional Milvus/Zilliz path. If the remote
+              backend times out during validation or lifecycle work, follow the
+              returned retryable backend guidance; do not treat it as a failure of
+              the default local LanceDB runtime.
             </p>
           </div>
           <div class="panel">
-            <h3>Collection limit reached</h3>
+            <h3>Connected collection limit</h3>
             <p>
-              Some Zilliz tiers limit collections. Follow the returned
-              <code>manage_index</code> guidance for the named collection, then
-              retry the original lifecycle action.
+              This applies only to optional Zilliz/Milvus deployments. If the
+              backend reports a collection-capacity limit, follow the returned
+              <code>manage_index</code> guidance for that backend before retrying.
             </p>
           </div>
         </div>
@@ -1477,8 +1481,8 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
       <section class="section" id="boundaries">
         <h2>Operational Boundaries</h2>
         <p class="lede">
-          Satori provides context, navigation, reads, warnings, and recovery
-          guidance. It does not replace the developer's normal editing,
+          Satori provides retrieval, structural/relationship navigation, warnings,
+          and recovery guidance. It does not replace the developer's normal editing,
           testing, or review workflow.
         </p>
         <div class="grid">
@@ -1504,10 +1508,11 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
             </p>
           </div>
           <div class="panel">
-            <h3>Not hosted SaaS yet</h3>
+            <h3>Local-first product boundary</h3>
             <p>
-              Satori is currently local-first and open source. Hosted indexing
-              experiments and team workflows are roadmap items.
+              The current release is designed to run on the developer machine or
+              self-managed infrastructure. The public product contract does not
+              depend on a hosted Satori control plane.
             </p>
           </div>
         </div>
@@ -1519,7 +1524,7 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
         <div class="footer-col">
           <img class="footer-brand-logo" src="../logo-mark.svg" alt="Satori logo" width="39" height="40" />
           <h5>Satori</h5>
-          <p>Repo context for AI coding agents. Investigate real codebases before editing.</p>
+          <p>Fast local repository intelligence for coding agents before they edit.</p>
         </div>
         <div class="footer-col">
           <h5>Resources</h5>
