@@ -837,9 +837,10 @@ test("runDoctor keeps independent runtime-owner registries out of one conflict d
         }));
 
         const ownerChecks = result.checks.filter((entry) => entry.name === "runtime_owners");
-        assert.equal(ownerChecks.length, 2);
+        assert.equal(ownerChecks.length, 3);
         assert.equal(ownerChecks.every((check) => check.status === "ok"), true);
         assert.equal(ownerChecks.some((check) => /runtime_owner_conflict/.test(check.message)), false);
+        assert.equal(ownerChecks.some((check) => /Active runtime owner registry has not been created yet/.test(check.message)), true);
         assert.equal(ownerChecks.some((check) => check.message.includes(lanceOwnersPath)), true);
         assert.equal(ownerChecks.some((check) => check.message.includes(milvusOwnersPath)), true);
     } finally {
@@ -871,13 +872,13 @@ test("runDoctor reports a corrupt runtime-owner registry without suppressing hea
         }));
 
         const ownerChecks = result.checks.filter((entry) => entry.name === "runtime_owners");
-        assert.equal(ownerChecks.length, 2);
+        assert.equal(ownerChecks.length, 3);
         const warning = ownerChecks.find((check) => check.status === "warning");
-        const healthy = ownerChecks.find((check) => check.status === "ok");
-        assert.match(warning?.message || "", /Could not parse runtime owner registry/);
+        const healthyDomain = ownerChecks.find((check) => check.message.includes(milvusOwnersPath));
+        assert.match(warning?.message || "", /Could not parse inactive\/historical runtime owner registry/);
         assert.match(warning?.message || "", new RegExp(lanceOwnersPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-        assert.match(healthy?.message || "", /pid=222/);
-        assert.equal(healthy?.message.includes(milvusOwnersPath), true);
+        assert.equal(healthyDomain?.status, "ok");
+        assert.match(healthyDomain?.message || "", /pid=222/);
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }

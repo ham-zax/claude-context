@@ -23,7 +23,10 @@ import {
 import { readLocalDiagnosticsSummary, type LocalDiagnosticsSummary } from "./local-diagnostics.js";
 import { sanitizeTerminalText } from "./terminal-sanitize.js";
 import { SATORI_CLI_NPX_COMMAND } from "./cli-command.js";
-import { discoverRuntimeOwnerRegistryPaths } from "./runtime-owner-path.js";
+import {
+    discoverRuntimeOwnerRegistryPaths,
+    resolveRuntimeOwnerRegistryPath,
+} from "./runtime-owner-path.js";
 export { SATORI_CLI_NPX_COMMAND } from "./cli-command.js";
 
 type CheckStatus = "ok" | "warning" | "error";
@@ -774,14 +777,23 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
         }
     }
 
+    const activeRuntimeOwnersPath = options.runtimeOwnersPath
+        || resolveRuntimeOwnerRegistryPath(homeDir, runtimeEnv);
     const runtimeOwnersPaths = options.runtimeOwnersPath
         ? [options.runtimeOwnersPath]
-        : discoverRuntimeOwnerRegistryPaths(homeDir, env);
+        : discoverRuntimeOwnerRegistryPaths(homeDir, runtimeEnv);
     const inspectProcess = resolveProcessInspector(options);
     const expectedRuntimeOwnerVersion = activeManagedRuntime?.status === "active"
         ? activeManagedRuntime.mcpVersion
         : (packageVersions.find((entry) => entry.name === "@zokizuan/satori-mcp")?.version ?? null);
-    appendRuntimeOwnerChecks(checks, nextSteps, runtimeOwnersPaths, inspectProcess, expectedRuntimeOwnerVersion);
+    appendRuntimeOwnerChecks(
+        checks,
+        nextSteps,
+        runtimeOwnersPaths,
+        activeRuntimeOwnersPath,
+        inspectProcess,
+        expectedRuntimeOwnerVersion,
+    );
 
     if (options.mutationLeasesPath !== null) {
         appendMutationLeaseChecks(
@@ -866,19 +878,21 @@ function appendRuntimeOwnerRegistryCheck(
     runtimeOwnersPath: string,
     inspectProcess: (pid: number) => DoctorProcessSnapshot | null,
     expectedActiveMcpVersion: string | null,
+    isActiveRegistry: boolean,
 ): void {
+    const registryLabel = isActiveRegistry ? "Active" : "Inactive/historical";
     let parsed: unknown;
     try {
         parsed = JSON.parse(fs.readFileSync(runtimeOwnersPath, "utf8"));
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        addCheck(checks, "runtime_owners", "warning", `Could not parse runtime owner registry at ${runtimeOwnersPath}: ${message}`);
+        addCheck(checks, "runtime_owners", "warning", `Could not parse ${registryLabel.toLowerCase()} runtime owner registry at ${runtimeOwnersPath}: ${message}`);
         nextSteps.push(`Inspect or remove the corrupt runtime owner file at ${runtimeOwnersPath}, then restart Satori MCP clients.`);
         return;
     }
 
     if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { owners?: unknown }).owners)) {
-        addCheck(checks, "runtime_owners", "warning", `Runtime owner registry shape is invalid at ${runtimeOwnersPath}.`);
+        addCheck(checks, "runtime_owners", "warning", `${registryLabel} runtime owner registry shape is invalid at ${runtimeOwnersPath}.`);
         nextSteps.push(`Fix or remove ${runtimeOwnersPath}, then restart Satori MCP clients.`);
         return;
     }
@@ -896,8 +910,8 @@ function appendRuntimeOwnerRegistryCheck(
             "runtime_owners",
             dead > 0 ? "warning" : "ok",
             dead > 0
-                ? `Runtime owner registry has ${dead} stale (dead or replaced) entr${dead === 1 ? "y" : "ies"} and no live MCP owners${registryLocation}.`
-                : `Runtime owner registry is empty${registryLocation}.`,
+                ? `${registryLabel} runtime owner registry has ${dead} stale (dead or replaced) entr${dead === 1 ? "y" : "ies"} and no live MCP owners${registryLocation}.`
+                : `${registryLabel} runtime owner registry is empty${registryLocation}.`,
         );
         if (dead > 0) {
             nextSteps.push(`Start any Satori MCP client once so dead runtime owners prune, or remove stale entries from ${runtimeOwnersPath} after all MCP processes exit.`);
@@ -918,7 +932,7 @@ function appendRuntimeOwnerRegistryCheck(
             checks,
             "runtime_owners",
             "error",
-            `Live Satori MCP runtime identities conflict${registryLocation} (pids ${pids}; versions ${versions.join(", ")}; evidence: ${conflictReasons.join(", ")}). manage_index mutations will return runtime_owner_conflict.`,
+            `${registryLabel} Satori MCP runtime identities conflict${registryLocation} (pids ${pids}; versions ${versions.join(", ")}; evidence: ${conflictReasons.join(", ")}). manage_index mutations will return runtime_owner_conflict.`,
         );
         nextSteps.push(
             `Stop extra Satori MCP clients for ${runtimeOwnersPath} so one runtime identity remains (live pids: ${pids}), then restart the intended client.`,
@@ -935,7 +949,7 @@ function appendRuntimeOwnerRegistryCheck(
             checks,
             "runtime_owners",
             "error",
-            `Live Satori MCP runtime${registryLocation} does not match expected MCP version ${expectedActiveMcpVersion}: ${details}. This is a stale resident runtime.`,
+            `${registryLabel} Satori MCP runtime${registryLocation} does not match expected MCP version ${expectedActiveMcpVersion}: ${details}. This is a stale resident runtime.`,
         );
         nextSteps.push(`Stop stale Satori MCP runtime pids ${installedMismatches.map((owner) => owner.pid).join(", ")} and restart the intended MCP client.`);
         return;
@@ -946,7 +960,7 @@ function appendRuntimeOwnerRegistryCheck(
             checks,
             "runtime_owners",
             "ok",
-            `${live.length} live Satori MCP processes${registryLocation} share version ${versions[0]} (pids ${pids}). Same identity is allowed; stop extras only if you want a single client.`,
+            `${live.length} live Satori MCP processes in the ${registryLabel.toLowerCase()} registry${registryLocation} share version ${versions[0]} (pids ${pids}). Same identity is allowed; stop extras only if you want a single client.`,
         );
         return;
     }
@@ -955,7 +969,7 @@ function appendRuntimeOwnerRegistryCheck(
         checks,
         "runtime_owners",
         "ok",
-        `One live Satori MCP owner${registryLocation}: pid=${pids} satori@${versions[0]}.`,
+        `One live Satori MCP owner in the ${registryLabel.toLowerCase()} registry${registryLocation}: pid=${pids} satori@${versions[0]}.`,
     );
 }
 
@@ -963,22 +977,57 @@ function appendRuntimeOwnerChecks(
     checks: DoctorCheck[],
     nextSteps: string[],
     runtimeOwnersPaths: readonly string[],
+    activeRuntimeOwnersPath: string,
     inspectProcess: (pid: number) => DoctorProcessSnapshot | null,
     expectedActiveMcpVersion: string | null,
 ): void {
     const existingPaths = runtimeOwnersPaths.filter((filePath) => fs.existsSync(filePath));
-    if (existingPaths.length === 0) {
-        addCheck(checks, "runtime_owners", "ok", "No runtime owner registry yet (no concurrent MCP owners recorded).");
-        return;
+    if (fs.existsSync(activeRuntimeOwnersPath)) {
+        appendRuntimeOwnerRegistryCheck(
+            checks,
+            nextSteps,
+            activeRuntimeOwnersPath,
+            inspectProcess,
+            expectedActiveMcpVersion,
+            true,
+        );
+    } else {
+        addCheck(
+            checks,
+            "runtime_owners",
+            "ok",
+            `Active runtime owner registry has not been created yet at ${activeRuntimeOwnersPath} (no concurrent MCP owners recorded).`,
+        );
     }
 
-    for (const runtimeOwnersPath of existingPaths) {
+    const inactivePaths = existingPaths.filter((filePath) => filePath !== activeRuntimeOwnersPath);
+    const emptyInactivePaths: string[] = [];
+    for (const runtimeOwnersPath of inactivePaths) {
+        try {
+            const parsed = JSON.parse(fs.readFileSync(runtimeOwnersPath, "utf8")) as { owners?: unknown };
+            if (Array.isArray(parsed?.owners) && parsed.owners.length === 0) {
+                emptyInactivePaths.push(runtimeOwnersPath);
+                continue;
+            }
+        } catch {
+            // Let the full registry check report malformed historical state.
+        }
         appendRuntimeOwnerRegistryCheck(
             checks,
             nextSteps,
             runtimeOwnersPath,
             inspectProcess,
             expectedActiveMcpVersion,
+            false,
+        );
+    }
+
+    if (emptyInactivePaths.length > 0) {
+        addCheck(
+            checks,
+            "runtime_owners_history",
+            "ok",
+            `${emptyInactivePaths.length} inactive/historical runtime owner ${emptyInactivePaths.length === 1 ? "registry is" : "registries are"} retained and empty: ${emptyInactivePaths.join(", ")}.`,
         );
     }
 }

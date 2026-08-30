@@ -272,7 +272,14 @@ export function formatDoctorText(result: DoctorResult, options: DoctorTextOption
         for (const pkg of result.packageVersions) {
             lines.push(`- ${pkg.name}@${pkg.version ?? "unknown"} (${packageSourceLabel(pkg.name)}): ${pkg.source}`);
         }
-        lines.push("", "Local diagnostics", "", JSON.stringify(result.localDiagnostics, null, 2));
+        lines.push(
+            "",
+            "Local diagnostics (retained history)",
+            "",
+            "These counters summarize retained local tool events. warningCodes and fallbackUses are historical counters and do not contribute to the current Doctor problem/warning totals.",
+            "",
+            JSON.stringify(result.localDiagnostics, null, 2),
+        );
     } else {
         lines.push("", `Run \`${SATORI_CLI_NPX_COMMAND} doctor --verbose\` for paths and complete diagnostics.`);
     }
