@@ -4,15 +4,17 @@
 [![CI](https://github.com/ham-zax/satori/actions/workflows/ci.yml/badge.svg)](https://github.com/ham-zax/satori/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@zokizuan/satori-cli?label=npm)](https://www.npmjs.com/package/@zokizuan/satori-cli)
 
-Give your coding agent a fast, freshness-aware map of the repository before it edits.
+Give any MCP-compatible coding harness symbol and AST-derived code intelligence—fast, local, and context-efficient.
 
-Satori is a local-first repository intelligence layer for coding agents. It combines exact evidence, lexical retrieval, dense retrieval, symbol ownership, and conservative call relationships behind MCP tools, so an agent can find behavior by intent, open the real owner, follow nearby code, and read only the source needed to act. Offline search uses bundled Potion embeddings, BM25, and LanceDB—no model API key required.
+Satori is a local-first code-intelligence layer for coding agents. Through MCP, a generic harness gets exact symbol navigation, parser-derived structural outlines and source spans, conservative call relationships, and hybrid retrieval without building its own language-intelligence stack. The agent can find behavior by intent, open the real owner, and request a bounded code slice instead of scanning whole files or the repository wholesale. Offline search uses bundled Potion embeddings, BM25, and LanceDB—no model API key required.
 
 ## Product
 
 Satori is built for the part of coding-agent work that should be fast, repeatable, and evidence-backed before any edit happens:
 
+- **Drop-in symbol + AST-derived intelligence.** Any MCP-compatible harness can use exact symbols, structural outlines, source spans, ownership, and qualified call navigation without implementing its own parser and repository index stack.
 - **Fast local retrieval.** On the Satori repository benchmark, warm Potion + LanceDB search measured **154.543 ms p95** across 10,830 indexed chunks. The benchmark and its limits are documented below.
+- **Massively less context waste.** Ranked owner-oriented results and bounded symbol/source reads keep broad file dumps out of the model context, so repository discovery spends tokens on the exact code the agent needs instead of scanning whole files.
 - **Robust publication architecture.** Satori builds complete searchable generations, checks source freshness, and activates publications atomically instead of exposing a partially updated index.
 - **Real language navigation.** TypeScript, JavaScript, Python, Go, Java, C#, C++, Rust, and Scala have production symbol navigation plus qualified `CALLS v0` support.
 - **Conservative graph semantics.** Ambiguous or unproved call relationships fail closed; the graph is navigation evidence, not a compiler-grade blast-radius claim.
@@ -184,18 +186,11 @@ The same frozen 30 positive retrieval tasks were queried against compatible Poti
 
 Potion is a useful local first stage, not a claim of Voyage parity. The comparison found weaker Java and configuration/runtime retrieval for Potion. The paired latency observations are descriptive rather than a repeated cross-provider performance qualification.
 
-### Less context waste
+### Token-efficient retrieval
 
-Satori groups retrieval around owners and exposes bounded source instead of making an agent assemble context from repeated broad reads. In a fresh two-task OpenCode comparison, both the Satori and native file-discovery arms produced correct answers:
+Satori groups retrieval around owners and exposes bounded source instead of making an agent assemble context from repeated broad reads. The product is designed to cut repository-discovery token waste dramatically by routing exact symbols and compact source windows instead of whole-file dumps.
 
-| Correct paired tasks | Satori tools | Native `grep` / `glob` / `read` |
-|---|---:|---:|
-| Tool calls | 16 | 25 |
-| Tool-output bytes shown to the model | 76,113 | 96,801 |
-| Agent wall time | 51.65 s | 96.04 s |
-| Total model tokens | 46,767 | 46,759 |
-
-That exploratory run used 36% fewer tool calls, 21% fewer tool-output bytes, and 46% less wall time. Total model tokens were effectively unchanged, so this is evidence of a shorter evidence route—not a universal token-savings claim. It was one run per task, and OpenCode recovered from two rejected Satori tool calls in the exact-owner task.
+A fresh two-task OpenCode comparison also reached the correct answers through a shorter evidence route. The detailed exploratory artifact retains the raw tool, context, and token accounting; this public page deliberately does not turn one small run into a universal token-reduction percentage.
 
 The qualification details and limitations remain available in the [Potion plan](./docs/plans/SATORI_POTION_OFFLINE_EMBEDDING_LEAN_QUALIFICATION_PLAN.md).
 
