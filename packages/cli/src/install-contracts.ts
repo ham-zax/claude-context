@@ -11,7 +11,10 @@ import type {
     InstallPreflightInput,
     InstallPreflightResult,
 } from "./install-preflight.js";
-import type { LateOnAuthorityLoader } from "./lateon-model-store.js";
+import type {
+    LateOnAuthorityLoader,
+    LateOnModelProgressReporter,
+} from "./lateon-model-store.js";
 
 export const LEGACY_SKILL_DIR_NAME = "satori";
 export const MANAGED_RUNTIME_DIR = "mcp-runtime";
@@ -140,6 +143,8 @@ export interface InstallCommandOptions {
     lateOnAuthorityLoader?: LateOnAuthorityLoader;
     /** Test seam for proving LateOn acquisition deadline handling without waiting ten minutes. */
     lateOnNowImpl?: () => number;
+    lateOnProgress?: LateOnModelProgressReporter;
+    lateOnRetryCommand?: string;
     platform?: NodeJS.Platform;
     architecture?: string;
     libc?: "gnu" | "musl";

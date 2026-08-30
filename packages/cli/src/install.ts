@@ -195,6 +195,8 @@ export async function executeInstallCommand(
                         options.fetchImpl,
                         options.lateOnAuthorityLoader,
                         options.lateOnNowImpl,
+                        options.lateOnProgress,
+                        options.lateOnRetryCommand,
                     );
                 }
                 const preflightDependencies: InstallPreflightDependencies = {

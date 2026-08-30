@@ -9,7 +9,7 @@ import { parseCliArgs, parseWrapperArgumentsFromSchema, resolveRawArguments } fr
 import type { ParsedCommand } from "./args.js";
 import { connectCliMcpSession, type CallToolResult, type ListToolsResult } from "./client.js";
 import { asCliError, CliError } from "./errors.js";
-import { emitError, emitJson, inferManageStatusState, parseStructuredEnvelope } from "./format.js";
+import { emitError, emitJson, inferManageStatusState, parseStructuredEnvelope, type CliWriters } from "./format.js";
 import {
     assertAutoClientTargets,
     executeInstallCommand,
@@ -18,7 +18,11 @@ import {
     type ManagedRuntimeUpgradePhase,
     type ManagedRuntimeUpgradeResult,
 } from "./install.js";
-import type { LateOnAuthorityLoader } from "./lateon-model-store.js";
+import type {
+    LateOnAuthorityLoader,
+    LateOnModelProgressEvent,
+    LateOnModelProgressReporter,
+} from "./lateon-model-store.js";
 import type {
     InstallPreflightDependencies,
     InstallPreflightInput,
@@ -96,6 +100,8 @@ interface RunCliOptions {
             preflightDependencies?: InstallPreflightDependencies;
             preflightRunner?: RunCliOptions["installPreflightRunner"];
             onUpgradeProgress?: (phase: ManagedRuntimeUpgradePhase) => void;
+            lateOnProgress?: LateOnModelProgressReporter;
+            lateOnRetryCommand?: string;
         },
     ) => Promise<ManagedRuntimeUpgradeResult>;
     globalCliUpgradeRunner?: (input: GlobalCliUpgradeInput) => number | Promise<number>;
@@ -470,6 +476,50 @@ async function invokeTool(
     return 0;
 }
 
+const MEBIBYTE = 1024 * 1024;
+
+function formatModelBytes(bytes: number): string {
+    return `${(bytes / MEBIBYTE).toFixed(1)} MiB`;
+}
+
+function createLateOnProgressReporter(writers: CliWriters): LateOnModelProgressReporter {
+    let nextProgressPercent = 10;
+    return (event: LateOnModelProgressEvent) => {
+        if (event.phase === "checking") {
+            writers.writeStderr("LateOn model: checking local cache...\n");
+            return;
+        }
+        if (event.phase === "downloading") {
+            nextProgressPercent = 10;
+            writers.writeStderr(
+                `LateOn model: downloading ${event.repository} from Hugging Face (${formatModelBytes(event.totalBytes)})...\n`,
+            );
+            return;
+        }
+        if (event.phase === "progress") {
+            const percent = Math.min(100, Math.floor((event.totalBytesDownloaded / event.totalBytes) * 100));
+            if (percent < nextProgressPercent && event.totalBytesDownloaded < event.totalBytes) {
+                return;
+            }
+            const displayPercent = event.totalBytesDownloaded >= event.totalBytes
+                ? 100
+                : Math.floor(percent / 10) * 10;
+            while (nextProgressPercent <= displayPercent) nextProgressPercent += 10;
+            writers.writeStderr(
+                `  ${String(displayPercent).padStart(3)}% · ${formatModelBytes(event.totalBytesDownloaded)} / ${formatModelBytes(event.totalBytes)} · ${event.artifact}\n`,
+            );
+            return;
+        }
+        if (event.phase === "verifying") {
+            const label = event.source === "cached" ? "cached model" : "downloaded model";
+            writers.writeStderr(`LateOn model: verifying ${label}...\n`);
+            return;
+        }
+        const label = event.source === "cached" ? "cached and verified" : "downloaded and verified";
+        writers.writeStderr(`LateOn model: ${label} (${formatModelBytes(event.totalBytes)}).\n`);
+    };
+}
+
 export async function runCli(argv: string[], options: RunCliOptions = {}): Promise<number> {
     const writers = {
         writeStdout: options.writeStdout || ((text: string) => process.stdout.write(text)),
@@ -591,6 +641,8 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
                         writers.writeStderr(`${messages[phase]}\n`);
                     }
                     : undefined,
+                lateOnProgress: showProgress ? createLateOnProgressReporter(writers) : undefined,
+                lateOnRetryCommand: satoriCliCommand("update"),
             });
             const delegatedFromCli = effectiveEnv.SATORI_UPGRADE_DELEGATED_TARGET === currentCliVersion
                 ? effectiveEnv.SATORI_UPGRADE_FROM_CLI_VERSION
@@ -639,6 +691,10 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
                 preflightDependencies: options.installPreflightDependencies,
                 preflightRunner: options.installPreflightRunner,
                 lateOnAuthorityLoader: options.installLateOnAuthorityLoader,
+                lateOnProgress: wantsJson ? undefined : createLateOnProgressReporter(writers),
+                lateOnRetryCommand: parsed.command.kind === "install" && parsed.command.runtime === "offline"
+                    ? satoriCliCommand(`install --runtime offline --reranker lateon --client ${parsed.command.client}`)
+                    : undefined,
             });
             if (parsed.command.kind === "install" && !parsed.command.dryRun) {
                 const postflight = await (options.installPostflightRunner || runInstallPostflight)({

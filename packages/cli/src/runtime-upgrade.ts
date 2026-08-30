@@ -288,6 +288,8 @@ export async function executeManagedRuntimeUpgrade(
                 options.fetchImpl,
                 options.lateOnAuthorityLoader,
                 options.lateOnNowImpl,
+                options.lateOnProgress,
+                options.lateOnRetryCommand,
             )
             : undefined;
         const preflightDependencies: InstallPreflightDependencies = {

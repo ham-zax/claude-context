@@ -21,8 +21,10 @@ import {
     PREVIOUS_LATEON_CONTEXT_V3_ACTIVATED_PROFILE_ID,
     PREVIOUS_LATEON_CONTEXT_V3_ACTIVATION_POLICY,
     ensureDefaultLateOnModel,
+    resolveDefaultLateOnModelDirectory,
     verifyLateOnModelDirectory,
     type LateOnAuthorityLoader,
+    type LateOnModelProgressReporter,
     type VerifiedLateOnModel,
 } from "./lateon-model-store.js";
 
@@ -177,6 +179,8 @@ export async function resolveVerifiedLateOnModel(
     fetchImpl: typeof fetch | undefined,
     authorityLoader: LateOnAuthorityLoader | undefined,
     nowImpl: (() => number) | undefined,
+    onProgress?: LateOnModelProgressReporter,
+    retryCommand?: string,
 ): Promise<VerifiedLateOnModel> {
     if (!runtimePackageRoot) {
         throw new CliError(
@@ -186,7 +190,8 @@ export async function resolveVerifiedLateOnModel(
         );
     }
     try {
-        if (requestedModelDirectory) {
+        const defaultModelDirectory = resolveDefaultLateOnModelDirectory(homeDir);
+        if (requestedModelDirectory && path.resolve(requestedModelDirectory) !== defaultModelDirectory) {
             return verifyLateOnModelDirectory({
                 modelDirectory: requestedModelDirectory,
                 runtimePackageRoot,
@@ -199,11 +204,13 @@ export async function resolveVerifiedLateOnModel(
             fetchImpl,
             authorityLoader,
             nowImpl,
+            onProgress,
         });
     } catch (error) {
         if (error instanceof CliError) throw error;
         const message = error instanceof Error ? error.message : String(error);
-        throw new CliError("E_INSTALL_PREFLIGHT", `LateOn D32 model preflight failed: ${message}`, 1);
+        const retry = retryCommand ? `\nRetry: ${retryCommand}` : "";
+        throw new CliError("E_INSTALL_PREFLIGHT", `LateOn D32 model preflight failed: ${message}${retry}`, 1);
     }
 }
 

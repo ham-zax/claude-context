@@ -107,10 +107,46 @@ export type VerifiedLateOnModel = Readonly<{
     runtimeProfileSha256: string;
 }>;
 
+export type LateOnModelProgressEvent =
+    | Readonly<{
+        phase: "checking";
+        modelDirectory: string;
+        totalBytes: number;
+    }>
+    | Readonly<{
+        phase: "downloading";
+        modelDirectory: string;
+        repository: string;
+        totalBytes: number;
+    }>
+    | Readonly<{
+        phase: "progress";
+        artifact: string;
+        artifactBytesDownloaded: number;
+        artifactBytesTotal: number;
+        totalBytesDownloaded: number;
+        totalBytes: number;
+    }>
+    | Readonly<{
+        phase: "verifying";
+        modelDirectory: string;
+        totalBytes: number;
+        source: "cached" | "downloaded";
+    }>
+    | Readonly<{
+        phase: "ready";
+        modelDirectory: string;
+        totalBytes: number;
+        source: "cached" | "downloaded";
+    }>;
+
+export type LateOnModelProgressReporter = (event: LateOnModelProgressEvent) => void;
+
 export type EnsureLateOnModelInput = Readonly<{
     homeDir: string;
     runtimePackageRoot: string;
     fetchImpl?: FetchLike;
+    onProgress?: LateOnModelProgressReporter;
     /** Test seam for proving disk failures without depending on the host filesystem. */
     statfsImpl?: (path: string) => { bavail: number; bsize: number };
     /** Test seam for proving deadline handling without waiting ten minutes. */
@@ -429,9 +465,10 @@ export function verifyLateOnModelDirectory(input: Readonly<{
     authorityLoader?: LateOnAuthorityLoader;
 }>): VerifiedLateOnModel {
     const authority = (input.authorityLoader ?? frozenAcquisitionAuthority)(input.runtimePackageRoot);
-    verifyModelDirectory(input.modelDirectory, authority);
+    const modelDirectory = path.resolve(input.modelDirectory);
+    verifyModelDirectory(modelDirectory, authority);
     return Object.freeze({
-        modelDirectory: path.resolve(input.modelDirectory),
+        modelDirectory,
         profileId: authority.profileId,
         runtimeProfileSha256: authority.runtimeProfileSha256,
     });
@@ -498,6 +535,7 @@ async function downloadArtifact(
     fetchImpl: FetchLike,
     deadlineAt: number,
     now: () => number,
+    onProgress?: (bytesWritten: number) => void,
 ): Promise<void> {
     let currentUrl = initialUrl;
     const abortController = new AbortController();
@@ -567,6 +605,7 @@ async function downloadArtifact(
                 }
                 bytesWritten += chunk.length;
                 digest.update(chunk);
+                onProgress?.(bytesWritten);
             }
             fs.fsyncSync(file);
         } finally {
@@ -597,8 +636,25 @@ export async function ensureDefaultLateOnModel(
 ): Promise<VerifiedLateOnModel> {
     const authority = (input.authorityLoader ?? frozenAcquisitionAuthority)(input.runtimePackageRoot);
     const modelDirectory = resolveDefaultLateOnModelDirectory(input.homeDir);
+    input.onProgress?.({
+        phase: "checking",
+        modelDirectory,
+        totalBytes: authority.totalExpectedArtifactBytes,
+    });
     if (pathExists(modelDirectory)) {
+        input.onProgress?.({
+            phase: "verifying",
+            modelDirectory,
+            totalBytes: authority.totalExpectedArtifactBytes,
+            source: "cached",
+        });
         verifyModelDirectory(modelDirectory, authority);
+        input.onProgress?.({
+            phase: "ready",
+            modelDirectory,
+            totalBytes: authority.totalExpectedArtifactBytes,
+            source: "cached",
+        });
         return Object.freeze({
             modelDirectory,
             profileId: authority.profileId,
@@ -616,6 +672,13 @@ export async function ensureDefaultLateOnModel(
     const stagingDirectory = fs.mkdtempSync(path.join(parent, ".lateon-install-"));
     const now = input.nowImpl ?? Date.now;
     const deadlineAt = now() + authority.downloadDeadlineMilliseconds;
+    input.onProgress?.({
+        phase: "downloading",
+        modelDirectory,
+        repository: authority.repository,
+        totalBytes: authority.totalExpectedArtifactBytes,
+    });
+    let completedBytes = 0;
     try {
         for (const artifact of authority.artifacts) {
             let destination = stagingDirectory;
@@ -643,11 +706,32 @@ export async function ensureDefaultLateOnModel(
                 input.fetchImpl ?? fetch,
                 deadlineAt,
                 now,
+                (artifactBytesDownloaded) => input.onProgress?.({
+                    phase: "progress",
+                    artifact: artifact.path,
+                    artifactBytesDownloaded,
+                    artifactBytesTotal: artifact.sizeBytes,
+                    totalBytesDownloaded: completedBytes + artifactBytesDownloaded,
+                    totalBytes: authority.totalExpectedArtifactBytes,
+                }),
             );
+            completedBytes += artifact.sizeBytes;
         }
+        input.onProgress?.({
+            phase: "verifying",
+            modelDirectory,
+            totalBytes: authority.totalExpectedArtifactBytes,
+            source: "downloaded",
+        });
         verifyModelDirectory(stagingDirectory, authority);
         if (pathExists(modelDirectory)) {
             verifyModelDirectory(modelDirectory, authority);
+            input.onProgress?.({
+                phase: "ready",
+                modelDirectory,
+                totalBytes: authority.totalExpectedArtifactBytes,
+                source: "downloaded",
+            });
             return Object.freeze({
                 modelDirectory,
                 profileId: authority.profileId,
@@ -663,6 +747,12 @@ export async function ensureDefaultLateOnModel(
             }
             verifyModelDirectory(modelDirectory, authority);
         }
+        input.onProgress?.({
+            phase: "ready",
+            modelDirectory,
+            totalBytes: authority.totalExpectedArtifactBytes,
+            source: "downloaded",
+        });
         return Object.freeze({
             modelDirectory,
             profileId: authority.profileId,
