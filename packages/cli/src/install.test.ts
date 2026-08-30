@@ -469,13 +469,13 @@ test("install writes managed Codex config and concise global guidance without sk
         assert.equal(fs.existsSync(path.join(homeDir, ".codex", "skills", "satori")), false);
         const codexInstructions = readFile(path.join(homeDir, ".codex", "AGENTS.md"));
         assert.equal(codexInstructions.includes("<!-- satori-mcp:start -->"), true);
-        assert.equal(codexInstructions.includes("Satori MCP is available"), true);
+        assert.equal(codexInstructions.includes("Satori is a repository code-intelligence layer for coding agents"), true);
         assert.equal(codexInstructions.includes("usual/native workflow"), true);
         assert.equal(codexInstructions.includes("## Priority Order"), true);
         assert.equal(codexInstructions.includes("Ask before `create`, `reindex`, or `clear`"), true);
         assert.equal(codexInstructions.includes("recommendedNextAction"), true);
         assert.equal(codexInstructions.includes("warnings[].action"), true);
-        assert.equal(codexInstructions.includes("Treat inbound `call_graph` results as leads to verify"), true);
+        assert.equal(codexInstructions.includes("Treat `call_graph` as navigation evidence, not complete blast-radius proof"), true);
         assert.equal(codexInstructions.includes("grep"), false);
         assert.equal(codexInstructions.includes("glob"), false);
     });
@@ -2257,7 +2257,7 @@ test("install replaces only the managed Codex AGENTS block and preserves user co
         assert.equal(content.includes("Keep this introduction."), true);
         assert.equal(content.includes("Keep this footer."), true);
         assert.equal(content.includes("old exact-only guidance"), false);
-        assert.equal(content.includes("Satori MCP is available"), true);
+        assert.equal(content.includes("Satori is a repository code-intelligence layer for coding agents"), true);
         assert.equal(content.match(/<!-- satori-mcp:start -->/g)?.length, 1);
         assert.equal(content.match(/<!-- satori-mcp:end -->/g)?.length, 1);
     });
@@ -2891,11 +2891,11 @@ test("install all smoke writes launcher-backed config for every supported client
         assert.equal(fs.existsSync(path.join(homeDir, ".codex", "skills", "satori")), false);
         const codexInstructions = readFile(path.join(homeDir, ".codex", "AGENTS.md"));
         assert.equal(codexInstructions.includes("<!-- satori-mcp:start -->"), true);
-        assert.equal(codexInstructions.includes("Satori MCP is available"), true);
+        assert.equal(codexInstructions.includes("Satori is a repository code-intelligence layer for coding agents"), true);
         assert.equal(codexInstructions.includes("recommendedNextAction"), true);
         assert.equal(codexInstructions.includes("warnings[].action"), true);
         assert.equal(codexInstructions.includes("usual/native workflow"), true);
-        assert.equal(codexInstructions.includes("Treat inbound `call_graph` results as leads to verify"), true);
+        assert.equal(codexInstructions.includes("Treat `call_graph` as navigation evidence, not complete blast-radius proof"), true);
 
         const claudeConfig = JSON.parse(readFile(path.join(homeDir, ".claude.json")));
         assert.equal(claudeConfig.mcpServers.satori.type, "stdio");
@@ -2920,7 +2920,7 @@ test("install all smoke writes launcher-backed config for every supported client
         assert.equal(opencodeInstructions.includes("recommendedNextAction"), true);
         assert.equal(opencodeInstructions.includes("warnings[].action"), true);
         assert.equal(opencodeInstructions.includes("usual/native workflow"), true);
-        assert.equal(opencodeInstructions.includes("Treat inbound `call_graph` results as leads to verify"), true);
+        assert.equal(opencodeInstructions.includes("Treat `call_graph` as navigation evidence, not complete blast-radius proof"), true);
     });
 });
 
