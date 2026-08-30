@@ -35,6 +35,7 @@ import { resolveInstalledPackageVersions, resolveRuntimeVersionState, runDoctor 
 import type { DoctorPackageVersion, DoctorResult, RuntimeVersionState } from "./doctor.js";
 import { emitDoctorText } from "./doctor-format.js";
 import { emitInstallText } from "./install-format.js";
+import { SATORI_CLI_NPX_COMMAND, satoriCliCommand } from "./cli-command.js";
 import { buildLocalDiagnosticEvent, recordLocalDiagnosticEvent } from "./local-diagnostics.js";
 import {
     CliUpgradeDelegationStartError,
@@ -335,12 +336,15 @@ function formatHelpText(): string {
         "Usage:",
         "  satori <command>",
         "",
-        "Get started:",
-        "  satori install",
-        "  satori doctor",
+        "Get started (no global install required):",
+        `  ${satoriCliCommand("install")}`,
+        `  ${satoriCliCommand("doctor")}`,
+        "",
+        "Optional persistent command:",
+        "  npm install -g @zokizuan/satori-cli@latest",
         "",
         "Optional Codex startup reminder:",
-        "  satori install --client codex --install-guidance-hook",
+        `  ${satoriCliCommand("install --client codex --install-guidance-hook")}`,
         "",
         "Commands:",
         "  install       Install Satori for detected clients; use --client all to force all supported clients",
@@ -357,7 +361,7 @@ function formatHelpText(): string {
         "  --format json     Print structured output",
         "  --debug           Show MCP startup details",
         "",
-        "Run `satori --format json --help` for complete command syntax.",
+        `Run \`${SATORI_CLI_NPX_COMMAND} --format json --help\` for complete command syntax.`,
         "",
     ].join("\n");
 }

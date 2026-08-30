@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { resolveSatoriStateRoot } from '../config/runtime-state-root';
 import type {
     Publication,
     PublicationId,
@@ -77,11 +78,10 @@ export function getSharedPublicationStore(
 }
 
 function resolveStateRoot(stateRoot?: string): string {
-    return path.resolve(
-        stateRoot
-            ?? process.env.SATORI_STATE_ROOT
-            ?? path.join(os.homedir(), '.satori'),
-    );
+    return resolveSatoriStateRoot({
+        configured: stateRoot ?? process.env.SATORI_STATE_ROOT,
+        homeDir: os.homedir(),
+    });
 }
 
 function publicationRootKey(canonicalRoot: string): string {

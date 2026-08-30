@@ -6,9 +6,9 @@ import type { Readable, Writable } from "node:stream";
 import os from "node:os";
 import path from "node:path";
 import { withSourceMeasurementOperation } from "@zokizuan/satori-core";
+import { resolveRuntimeOwnerStateDir } from "@zokizuan/satori-core/integration";
 import type { ContextMcpConfig, IndexFingerprint } from "../config.js";
 import { CapabilityResolver } from "../core/capabilities.js";
-import { resolveRuntimeOwnerStateDir } from "../core/runtime-state-root.js";
 import {
     SearchContinuationCoordinator,
     SearchContinuationCoordinatorPool,

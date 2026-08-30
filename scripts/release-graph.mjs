@@ -313,7 +313,7 @@ export function buildReleaseGraphReport(input) {
     } else if (pkg.published.version !== pkg.localVersion) {
       status = 'invalid-graph';
     } else {
-      const comparison = compareFileTreeSnapshots(pkg.localPackedSnapshot, pkg.published.packedSnapshot);
+      const comparison = compareFileTreeSnapshots(pkg.published.packedSnapshot, pkg.localPackedSnapshot);
       publishedVersion = pkg.published.version;
       if (comparison.identical) {
         status = 'published-identical';

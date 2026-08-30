@@ -413,19 +413,29 @@ test('published identical package is classified correctly', () => {
 });
 
 test('published same-version changed package is classified as stale', () => {
-  const leftSnapshot = Object.freeze([Object.freeze({ path: 'package/package.json', sha256: 'aaa', executable: false, sizeBytes: 2 })]);
-  const rightSnapshot = Object.freeze([Object.freeze({ path: 'package/package.json', sha256: 'bbb', executable: false, sizeBytes: 2 })]);
+  const localSnapshot = Object.freeze([
+    Object.freeze({ path: 'package/local.js', sha256: 'local', executable: false, sizeBytes: 1 }),
+    Object.freeze({ path: 'package/package.json', sha256: 'aaa', executable: false, sizeBytes: 2 }),
+  ]);
+  const publishedSnapshot = Object.freeze([
+    Object.freeze({ path: 'package/package.json', sha256: 'bbb', executable: false, sizeBytes: 2 }),
+    Object.freeze({ path: 'package/published.js', sha256: 'published', executable: false, sizeBytes: 1 }),
+  ]);
   const report = buildReleaseGraphReport(
     reportInput({
       packages: {
-        core: { localVersion: '3.6.0', localPackedSnapshot: leftSnapshot, published: { version: '3.6.0', packedSnapshot: rightSnapshot, packedManifest: {} } },
+        core: { localVersion: '3.6.0', localPackedSnapshot: localSnapshot, published: { version: '3.6.0', packedSnapshot: publishedSnapshot, packedManifest: {} } },
         mcp: { localVersion: '6.8.0', localPackedSnapshot: [], published: null },
         cli: { localVersion: '1.9.0', localPackedSnapshot: [], published: null },
       },
     })
   );
   assert.equal(report.packages.core.status, 'stale-version');
-  assert.deepEqual(report.packages.core.changedEntries, [{ path: 'package/package.json', change: 'content' }]);
+  assert.deepEqual(report.packages.core.changedEntries, [
+    { path: 'package/local.js', change: 'added' },
+    { path: 'package/package.json', change: 'content' },
+    { path: 'package/published.js', change: 'removed' },
+  ]);
   assert.equal(report.valid, false);
   assert.deepEqual(report.invalidPackages, ['core']);
 });

@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resolveSatoriStateRoot } from "@zokizuan/satori-core/integration";
 import { CliError } from "./errors.js";
+import { discoverRuntimeOwnerRegistryPaths } from "./runtime-owner-path.js";
 
 type ProcessObservation = Readonly<{
     pid: number;
@@ -143,43 +145,46 @@ function mergeCandidate(
 }
 
 function collectRuntimeOwners(
-    stateRoot: string,
+    registryPaths: readonly string[],
     candidates: Map<number, CandidateAccumulator>,
 ): number {
-    const registryPath = path.join(stateRoot, "runtime", "owners.json");
-    if (!fs.existsSync(registryPath)) {
-        return 0;
-    }
-    let parsed: unknown;
-    try {
-        parsed = JSON.parse(fs.readFileSync(registryPath, "utf8"));
-    } catch {
-        return 1;
-    }
-    if (
-        !isRecord(parsed)
-        || parsed.formatVersion !== "v1"
-        || !Array.isArray(parsed.owners)
-    ) {
-        return 1;
-    }
     let unverified = 0;
-    for (const value of parsed.owners) {
+    for (const registryPath of registryPaths) {
+        if (!fs.existsSync(registryPath)) {
+            continue;
+        }
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+        } catch {
+            unverified += 1;
+            continue;
+        }
         if (
-            !isRecord(value)
-            || !Number.isSafeInteger(value.pid)
-            || Number(value.pid) <= 0
-            || typeof value.processStartTime !== "string"
-            || value.processStartTime.length === 0
+            !isRecord(parsed)
+            || parsed.formatVersion !== "v1"
+            || !Array.isArray(parsed.owners)
         ) {
             unverified += 1;
             continue;
         }
-        mergeCandidate(candidates, {
-            pid: Number(value.pid),
-            processStartTime: value.processStartTime,
-            source: "runtime-owner",
-        });
+        for (const value of parsed.owners) {
+            if (
+                !isRecord(value)
+                || !Number.isSafeInteger(value.pid)
+                || Number(value.pid) <= 0
+                || typeof value.processStartTime !== "string"
+                || value.processStartTime.length === 0
+            ) {
+                unverified += 1;
+                continue;
+            }
+            mergeCandidate(candidates, {
+                pid: Number(value.pid),
+                processStartTime: value.processStartTime,
+                source: "runtime-owner",
+            });
+        }
     }
     return unverified;
 }
@@ -260,7 +265,10 @@ export async function terminateSatoriServers(
 ): Promise<TerminateResult> {
     const env = options.env ?? process.env;
     const homeDir = options.homeDir ?? env.HOME ?? os.homedir();
-    const stateRoot = path.resolve(env.SATORI_STATE_ROOT ?? path.join(homeDir, ".satori"));
+    const stateRoot = resolveSatoriStateRoot({
+        configured: env.SATORI_STATE_ROOT,
+        homeDir,
+    });
     const inspectProcess = options.inspectProcess ?? inspectProcessDefault;
     const signalProcess = options.signalProcess ?? ((pid, signal) => process.kill(pid, signal));
     const wait = options.wait ?? ((milliseconds) => new Promise<void>((resolve) => {
@@ -271,7 +279,10 @@ export async function terminateSatoriServers(
     const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 
     const accumulated = new Map<number, CandidateAccumulator>();
-    let unverifiedRecordCount = collectRuntimeOwners(stateRoot, accumulated);
+    let unverifiedRecordCount = collectRuntimeOwners(
+        discoverRuntimeOwnerRegistryPaths(homeDir, env),
+        accumulated,
+    );
     unverifiedRecordCount += collectSharedRuntimeHosts(stateRoot, accumulated);
     const normalized = normalizedCandidates(accumulated);
     unverifiedRecordCount += normalized.conflictedCount;

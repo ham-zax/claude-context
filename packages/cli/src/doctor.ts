@@ -26,8 +26,9 @@ import {
 } from "./runtime-config.js";
 import { readLocalDiagnosticsSummary, type LocalDiagnosticsSummary } from "./local-diagnostics.js";
 import { sanitizeTerminalText } from "./terminal-sanitize.js";
-
-export const SATORI_CLI_NPX_COMMAND = "npx -y @zokizuan/satori-cli@latest";
+import { SATORI_CLI_NPX_COMMAND } from "./cli-command.js";
+import { discoverRuntimeOwnerRegistryPaths } from "./runtime-owner-path.js";
+export { SATORI_CLI_NPX_COMMAND } from "./cli-command.js";
 
 type CheckStatus = "ok" | "warning" | "error";
 
@@ -109,7 +110,7 @@ export interface DoctorOptions {
     execFileSyncImpl?: DoctorExecFileSync;
     /** Optional override for tests; defaults to resolveInstalledPackageVersions(). */
     resolvePackageVersions?: () => DoctorPackageVersion[];
-    /** Override runtime owner registry path (default: ~/.satori/runtime/owners.json). */
+    /** Override runtime owner registry path (default: discovered managed runtime-owner registries). */
     runtimeOwnersPath?: string;
     /** Override process liveness check (default: process.kill(pid, 0)). */
     isProcessLive?: (pid: number) => boolean;
@@ -839,13 +840,14 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
         }
     }
 
-    const runtimeOwnersPath = options.runtimeOwnersPath
-        || path.join(homeDir, ".satori", "runtime", "owners.json");
+    const runtimeOwnersPaths = options.runtimeOwnersPath
+        ? [options.runtimeOwnersPath]
+        : discoverRuntimeOwnerRegistryPaths(homeDir, env);
     const inspectProcess = resolveProcessInspector(options);
     const expectedRuntimeOwnerVersion = activeManagedRuntime?.status === "active"
         ? activeManagedRuntime.mcpVersion
         : (packageVersions.find((entry) => entry.name === "@zokizuan/satori-mcp")?.version ?? null);
-    appendRuntimeOwnerChecks(checks, nextSteps, runtimeOwnersPath, inspectProcess, expectedRuntimeOwnerVersion);
+    appendRuntimeOwnerChecks(checks, nextSteps, runtimeOwnersPaths, inspectProcess, expectedRuntimeOwnerVersion);
 
     if (options.mutationLeasesPath !== null) {
         appendMutationLeaseChecks(
@@ -924,18 +926,13 @@ function appendManagedClientChecks(
     }
 }
 
-function appendRuntimeOwnerChecks(
+function appendRuntimeOwnerRegistryCheck(
     checks: DoctorCheck[],
     nextSteps: string[],
     runtimeOwnersPath: string,
     inspectProcess: (pid: number) => DoctorProcessSnapshot | null,
     expectedActiveMcpVersion: string | null,
 ): void {
-    if (!fs.existsSync(runtimeOwnersPath)) {
-        addCheck(checks, "runtime_owners", "ok", "No runtime owner registry yet (no concurrent MCP owners recorded).");
-        return;
-    }
-
     let parsed: unknown;
     try {
         parsed = JSON.parse(fs.readFileSync(runtimeOwnersPath, "utf8"));
@@ -953,6 +950,7 @@ function appendRuntimeOwnerChecks(
     }
 
     const owners = (parsed as { owners: Array<Record<string, unknown>> }).owners;
+    const registryLocation = ` at ${runtimeOwnersPath}`;
     const live = owners.filter((owner) => (
         typeof owner.pid === "number"
         && isSameProcess(owner.processStartTime, inspectProcess(owner.pid))
@@ -964,11 +962,11 @@ function appendRuntimeOwnerChecks(
             "runtime_owners",
             dead > 0 ? "warning" : "ok",
             dead > 0
-                ? `Runtime owner registry has ${dead} stale (dead or replaced) entr${dead === 1 ? "y" : "ies"} and no live MCP owners at ${runtimeOwnersPath}.`
-                : `Runtime owner registry is empty at ${runtimeOwnersPath}.`,
+                ? `Runtime owner registry has ${dead} stale (dead or replaced) entr${dead === 1 ? "y" : "ies"} and no live MCP owners${registryLocation}.`
+                : `Runtime owner registry is empty${registryLocation}.`,
         );
         if (dead > 0) {
-            nextSteps.push("Start any Satori MCP client once so dead runtime owners prune, or remove stale entries from ~/.satori/runtime/owners.json after all MCP processes exit.");
+            nextSteps.push(`Start any Satori MCP client once so dead runtime owners prune, or remove stale entries from ${runtimeOwnersPath} after all MCP processes exit.`);
         }
         return;
     }
@@ -986,10 +984,10 @@ function appendRuntimeOwnerChecks(
             checks,
             "runtime_owners",
             "error",
-            `Live Satori MCP runtime identities conflict (pids ${pids}; versions ${versions.join(", ")}; evidence: ${conflictReasons.join(", ")}). manage_index mutations will return runtime_owner_conflict.`,
+            `Live Satori MCP runtime identities conflict${registryLocation} (pids ${pids}; versions ${versions.join(", ")}; evidence: ${conflictReasons.join(", ")}). manage_index mutations will return runtime_owner_conflict.`,
         );
         nextSteps.push(
-            `Stop extra Satori MCP clients so one runtime identity remains (live pids: ${pids}), then restart the intended client.`,
+            `Stop extra Satori MCP clients for ${runtimeOwnersPath} so one runtime identity remains (live pids: ${pids}), then restart the intended client.`,
         );
         return;
     }
@@ -1003,7 +1001,7 @@ function appendRuntimeOwnerChecks(
             checks,
             "runtime_owners",
             "error",
-            `Live Satori MCP runtime does not match expected MCP version ${expectedActiveMcpVersion}: ${details}. This is a stale resident runtime.`,
+            `Live Satori MCP runtime${registryLocation} does not match expected MCP version ${expectedActiveMcpVersion}: ${details}. This is a stale resident runtime.`,
         );
         nextSteps.push(`Stop stale Satori MCP runtime pids ${installedMismatches.map((owner) => owner.pid).join(", ")} and restart the intended MCP client.`);
         return;
@@ -1014,7 +1012,7 @@ function appendRuntimeOwnerChecks(
             checks,
             "runtime_owners",
             "ok",
-            `${live.length} live Satori MCP processes share version ${versions[0]} (pids ${pids}). Same identity is allowed; stop extras only if you want a single client.`,
+            `${live.length} live Satori MCP processes${registryLocation} share version ${versions[0]} (pids ${pids}). Same identity is allowed; stop extras only if you want a single client.`,
         );
         return;
     }
@@ -1023,8 +1021,32 @@ function appendRuntimeOwnerChecks(
         checks,
         "runtime_owners",
         "ok",
-        `One live Satori MCP owner: pid=${pids} satori@${versions[0]}.`,
+        `One live Satori MCP owner${registryLocation}: pid=${pids} satori@${versions[0]}.`,
     );
+}
+
+function appendRuntimeOwnerChecks(
+    checks: DoctorCheck[],
+    nextSteps: string[],
+    runtimeOwnersPaths: readonly string[],
+    inspectProcess: (pid: number) => DoctorProcessSnapshot | null,
+    expectedActiveMcpVersion: string | null,
+): void {
+    const existingPaths = runtimeOwnersPaths.filter((filePath) => fs.existsSync(filePath));
+    if (existingPaths.length === 0) {
+        addCheck(checks, "runtime_owners", "ok", "No runtime owner registry yet (no concurrent MCP owners recorded).");
+        return;
+    }
+
+    for (const runtimeOwnersPath of existingPaths) {
+        appendRuntimeOwnerRegistryCheck(
+            checks,
+            nextSteps,
+            runtimeOwnersPath,
+            inspectProcess,
+            expectedActiveMcpVersion,
+        );
+    }
 }
 
 interface LeaseDiagnostic {

@@ -176,11 +176,12 @@ test("runCli defaults to human help and preserves structured help on request", a
     });
 
     assert.equal(exitCode, 0);
-    assert.match(io.read().stdout, /^Satori\n[\s\S]*Get started:\n {2}satori install/m);
-    assert.match(io.read().stdout, /satori install --client codex --install-guidance-hook/);
+    assert.match(io.read().stdout, /^Satori\n[\s\S]*Get started \(no global install required\):\n {2}npx -y @zokizuan\/satori-cli@latest install/m);
+    assert.match(io.read().stdout, /npx -y @zokizuan\/satori-cli@latest install --client codex --install-guidance-hook/);
+    assert.match(io.read().stdout, /npm install -g @zokizuan\/satori-cli@latest/);
     assert.match(io.read().stdout, /-v, --version\s+Show installed CLI, MCP, and Core versions/);
     assert.match(io.read().stdout, /terminate\s+Stop all running Satori MCP servers/);
-    assert.doesNotMatch(io.read().stdout, /satori-cli|legacy/i);
+    assert.doesNotMatch(io.read().stdout, /legacy/i);
     assert.equal(io.read().stderr, "");
 
     const jsonIo = captureIo();
@@ -557,7 +558,7 @@ test("runCli install updates config and emits a quiet human summary", async () =
     const io = captureIo();
 
     try {
-        const lateOnModelPath = path.join(homeDir, "lateon-model");
+        const lateOnModelPath = path.join(homeDir, "LateOn-Code-edge@fixture");
         writeLateOnModelDirectory(lateOnModelPath);
         const exitCode = await runCli(["install", "--client", "codex"], {
             writeStdout: io.writeStdout,
@@ -565,7 +566,13 @@ test("runCli install updates config and emits a quiet human summary", async () =
             env: { ...process.env, HOME: homeDir, SATORI_LATEON_MODEL_PATH: lateOnModelPath },
             installabilityVerifier: () => "@zokizuan/satori-mcp@4.4.1",
             installPreflightRunner: async () => ({
-                runtimeEnvironment: Object.freeze({ SATORI_RUNTIME_PROFILE: "connected" }),
+                runtimeEnvironment: Object.freeze({
+                    SATORI_RUNTIME_PROFILE: "offline",
+                    VECTOR_STORE_PROVIDER: "LanceDB",
+                    EMBEDDING_PROVIDER: "Potion",
+                    SATORI_RERANKER_PROVIDER: "lateon",
+                    SATORI_LATEON_MODEL_PATH: lateOnModelPath,
+                }),
             }),
             installRuntimeCommand: fakeInstallRuntimeCommand(homeDir),
             installLateOnAuthorityLoader: loadAcquisitionAuthority,
@@ -586,10 +593,12 @@ test("runCli install updates config and emits a quiet human summary", async () =
         const { stdout, stderr } = io.read();
         assert.equal(exitCode, 0);
         assert.match(stdout, /^Satori installed/m);
-        assert.match(stdout, /Runtime: Connected/);
+        assert.match(stdout, /Runtime: Offline · Potion · LanceDB/);
+        assert.match(stdout, /Reranker: LateOn · LateOn-Code-edge/);
         assert.match(stdout, /Client: Codex/);
         assert.match(stdout, /Verification: passed \(1 check\)/);
         assert.match(stdout, /Restart Codex to load Satori/);
+        assert.match(stdout, /Update later with `npx -y @zokizuan\/satori-cli@latest update`/);
         assert.equal(stderr, "");
         assert.doesNotMatch(stdout, /noisy startup detail|runtimeEnvironment|configPath/);
         assert.equal(fs.existsSync(path.join(homeDir, ".codex", "config.toml")), true);
@@ -624,7 +633,7 @@ test("runCli rejects an empty automatic client selection before package verifica
         assert.equal(preflightCalls, 0);
         assert.equal(fs.existsSync(path.join(homeDir, ".satori")), false);
         assert.match(io.read().stderr, /E_NO_CLIENTS_DETECTED/);
-        assert.match(io.read().stderr, /satori install --client all/);
+        assert.match(io.read().stderr, /npx -y @zokizuan\/satori-cli@latest install --client all/);
     } finally {
         fs.rmSync(homeDir, { recursive: true, force: true });
     }

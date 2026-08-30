@@ -18,7 +18,7 @@ const TOOL_NAMES = [
 ];
 
 function writeOwnerRegistry(homeDir: string, owners: unknown[]): void {
-    const filePath = path.join(homeDir, ".satori", "runtime", "owners.json");
+    const filePath = path.join(homeDir, ".satori", "runtime-owner", "owners.json");
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, JSON.stringify({ formatVersion: "v1", updatedAt: new Date(0).toISOString(), owners }), "utf8");
 }
@@ -34,7 +34,11 @@ async function installFixture(homeDir: string) {
         packageSpecifier: "@zokizuan/satori-mcp@4.11.17",
         runtimeCommand: { command: process.execPath, args: [path.join(homeDir, "runtime.js")] },
         preflightRunner: async () => ({
-            runtimeEnvironment: Object.freeze({ SATORI_RUNTIME_PROFILE: "connected" }),
+            runtimeEnvironment: Object.freeze({
+                SATORI_RUNTIME_PROFILE: "connected",
+                VECTOR_STORE_PROVIDER: "LanceDB",
+                LANCEDB_PATH: path.join(homeDir, ".satori", "vector", "lancedb"),
+            }),
         }),
     });
 }

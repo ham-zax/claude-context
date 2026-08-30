@@ -17,7 +17,7 @@ function withStateRoot(run: (stateRoot: string) => Promise<void>): Promise<void>
 
 test("terminate stops each verified Satori process once across both registries", async () => {
     await withStateRoot(async (stateRoot) => {
-        const runtimeDirectory = path.join(stateRoot, "runtime");
+        const runtimeDirectory = path.join(stateRoot, "runtime-owner");
         const hostDirectory = path.join(stateRoot, "runtime-host", "identity");
         fs.mkdirSync(runtimeDirectory, { recursive: true });
         fs.mkdirSync(hostDirectory, { recursive: true });
@@ -65,7 +65,7 @@ test("terminate stops each verified Satori process once across both registries",
 
 test("terminate ignores stale PID records instead of signaling a replacement process", async () => {
     await withStateRoot(async (stateRoot) => {
-        const runtimeDirectory = path.join(stateRoot, "runtime");
+        const runtimeDirectory = path.join(stateRoot, "runtime-owner");
         fs.mkdirSync(runtimeDirectory, { recursive: true });
         fs.writeFileSync(path.join(runtimeDirectory, "owners.json"), JSON.stringify({
             formatVersion: "v1",

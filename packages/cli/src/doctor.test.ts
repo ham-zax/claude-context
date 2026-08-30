@@ -24,7 +24,7 @@ const fixedPackageVersions = (): DoctorPackageVersion[] => [
     { name: "@zokizuan/satori-core", version: "1.6.12", source: "test" },
 ];
 
-/** Isolate doctor from the operator machine's ~/.satori/runtime/owners.json. */
+/** Isolate doctor from the operator machine's managed runtime-owner registries. */
 const noRuntimeOwnersPath = path.join(os.tmpdir(), "satori-doctor-no-owners-registry.json");
 const noDiagnosticsPath = path.join(os.tmpdir(), "satori-doctor-no-diagnostics.jsonl");
 
@@ -799,6 +799,87 @@ test("runDoctor errors on same-version runtime identity conflicts", async () => 
         assert.match(check?.message || "", /runtime fingerprint/);
         assert.match(check?.message || "", /config identity hash/);
         assert.match(check?.message || "", /runtime_owner_conflict/);
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
+test("runDoctor keeps independent runtime-owner registries out of one conflict domain", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-owner-domains-"));
+    const lanceOwnersPath = path.join(tempDir, ".satori", "runtime-owner", "owners.json");
+    const milvusOwnersPath = path.join(tempDir, ".satori", "runtime-owner", "milvus", "endpoint-a", "owners.json");
+    try {
+        fs.mkdirSync(path.dirname(lanceOwnersPath), { recursive: true });
+        fs.mkdirSync(path.dirname(milvusOwnersPath), { recursive: true });
+        fs.writeFileSync(lanceOwnersPath, JSON.stringify({
+            formatVersion: "v1",
+            owners: [runtimeOwner({
+                ownerId: "lance",
+                pid: 111,
+                processStartTime: "start-111",
+                runtimeFingerprint: { schemaVersion: "hybrid_v3", vectorStoreProvider: "LanceDB" },
+                runtimeOwnerIdentityHash: "lance-hash",
+            })],
+        }));
+        fs.writeFileSync(milvusOwnersPath, JSON.stringify({
+            formatVersion: "v1",
+            owners: [runtimeOwner({
+                ownerId: "milvus",
+                pid: 222,
+                processStartTime: "start-222",
+                runtimeFingerprint: { schemaVersion: "hybrid_v3", vectorStoreProvider: "Milvus" },
+                runtimeOwnerIdentityHash: "milvus-hash",
+            })],
+        }));
+
+        const result = await runDoctor(baseDoctorOptions({
+            env: { ...healthyEnv(), HOME: tempDir },
+            runtimeOwnersPath: undefined,
+            inspectProcess: (pid) => ({ pid, processStartTime: `start-${pid}` }),
+        }));
+
+        const ownerChecks = result.checks.filter((entry) => entry.name === "runtime_owners");
+        assert.equal(ownerChecks.length, 2);
+        assert.equal(ownerChecks.every((check) => check.status === "ok"), true);
+        assert.equal(ownerChecks.some((check) => /runtime_owner_conflict/.test(check.message)), false);
+        assert.equal(ownerChecks.some((check) => check.message.includes(lanceOwnersPath)), true);
+        assert.equal(ownerChecks.some((check) => check.message.includes(milvusOwnersPath)), true);
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
+test("runDoctor reports a corrupt runtime-owner registry without suppressing healthy domains", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-owner-corrupt-domain-"));
+    const lanceOwnersPath = path.join(tempDir, ".satori", "runtime-owner", "owners.json");
+    const milvusOwnersPath = path.join(tempDir, ".satori", "runtime-owner", "milvus", "endpoint-a", "owners.json");
+    try {
+        fs.mkdirSync(path.dirname(lanceOwnersPath), { recursive: true });
+        fs.mkdirSync(path.dirname(milvusOwnersPath), { recursive: true });
+        fs.writeFileSync(lanceOwnersPath, "{not-json", "utf8");
+        fs.writeFileSync(milvusOwnersPath, JSON.stringify({
+            formatVersion: "v1",
+            owners: [runtimeOwner({
+                ownerId: "milvus",
+                pid: 222,
+                processStartTime: "start-222",
+            })],
+        }));
+
+        const result = await runDoctor(baseDoctorOptions({
+            env: { ...healthyEnv(), HOME: tempDir },
+            runtimeOwnersPath: undefined,
+            inspectProcess: (pid) => ({ pid, processStartTime: `start-${pid}` }),
+        }));
+
+        const ownerChecks = result.checks.filter((entry) => entry.name === "runtime_owners");
+        assert.equal(ownerChecks.length, 2);
+        const warning = ownerChecks.find((check) => check.status === "warning");
+        const healthy = ownerChecks.find((check) => check.status === "ok");
+        assert.match(warning?.message || "", /Could not parse runtime owner registry/);
+        assert.match(warning?.message || "", new RegExp(lanceOwnersPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+        assert.match(healthy?.message || "", /pid=222/);
+        assert.equal(healthy?.message.includes(milvusOwnersPath), true);
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }

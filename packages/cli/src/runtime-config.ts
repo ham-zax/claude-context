@@ -1,5 +1,6 @@
 import path from "node:path";
 import { POTION_DIMENSION, POTION_MODEL_ID } from "@zokizuan/satori-core";
+import { satoriCliCommand } from "./cli-command.js";
 import {
     DEFAULT_LATEON_PROFILE_ID,
     HISTORICAL_LATEON_D32_ACTIVATION_POLICY,
@@ -156,7 +157,7 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
                 name: "embedding_model",
                 status: "error",
                 message: `Potion requires the pinned model identity ${POTION_MODEL_ID}; received ${model}.`,
-                nextStep: "Re-run satori install --runtime offline.",
+                nextStep: `Re-run ${satoriCliCommand("install --runtime offline")}.`,
             }
             : {
                 name: "embedding_model",
@@ -198,14 +199,14 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
                 name: "lateon_activation_policy",
                 status: "error",
                 message: `Historical LateOn activation policy bound: ${activationPolicy}.`,
-                nextStep: `Run \`satori upgrade\` to migrate to SATORI_LATEON_PROFILE=${DEFAULT_LATEON_PROFILE_ID} with SATORI_LATEON_ACTIVATION_POLICY=${LATEON_D32_ACTIVATION_POLICY}.`,
+                nextStep: `Run \`${satoriCliCommand("update")}\` to migrate to SATORI_LATEON_PROFILE=${DEFAULT_LATEON_PROFILE_ID} with SATORI_LATEON_ACTIVATION_POLICY=${LATEON_D32_ACTIVATION_POLICY}.`,
             });
         } else if (activationPolicy === PREVIOUS_LATEON_CONTEXT_V3_ACTIVATION_POLICY) {
             checks.push({
                 name: "lateon_activation_policy",
                 status: "error",
                 message: `Previous context-v3 LateOn activation policy bound: ${activationPolicy}.`,
-                nextStep: `Run \`satori upgrade\` to migrate to SATORI_LATEON_PROFILE=${DEFAULT_LATEON_PROFILE_ID} with SATORI_LATEON_ACTIVATION_POLICY=${LATEON_D32_ACTIVATION_POLICY}.`,
+                nextStep: `Run \`${satoriCliCommand("update")}\` to migrate to SATORI_LATEON_PROFILE=${DEFAULT_LATEON_PROFILE_ID} with SATORI_LATEON_ACTIVATION_POLICY=${LATEON_D32_ACTIVATION_POLICY}.`,
             });
         } else if (activationPolicy && activationPolicy !== LATEON_D32_ACTIVATION_POLICY) {
             checks.push({
@@ -226,7 +227,7 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
                     name: "lateon_activation_policy",
                     status: "error",
                     message: `SATORI_LATEON_ACTIVATION_POLICY=${LATEON_D32_ACTIVATION_POLICY} requires SATORI_LATEON_PROFILE=${DEFAULT_LATEON_PROFILE_ID}; received ${lateOnProfileId}.`,
-                    nextStep: `Run \`satori upgrade\` or \`satori install --reranker lateon\` to bind SATORI_LATEON_PROFILE=${DEFAULT_LATEON_PROFILE_ID}.`,
+                    nextStep: `Run \`${satoriCliCommand("update")}\` or \`${satoriCliCommand("install --reranker lateon")}\` to bind SATORI_LATEON_PROFILE=${DEFAULT_LATEON_PROFILE_ID}.`,
                 });
         } else {
             checks.push({
@@ -401,7 +402,7 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
                 name: "offline_model_digest",
                 status: "error",
                 message: "Offline runtime requires installer-recorded OLLAMA_MODEL_DIGEST.",
-                nextStep: "Re-run satori install --runtime offline with the selected local model.",
+                nextStep: `Re-run ${satoriCliCommand("install --runtime offline")} with the selected local model.`,
             });
         } else {
             checks.push({
@@ -427,7 +428,7 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
                 name: "potion_artifacts",
                 status: "error",
                 message: "Potion requires absolute POTION_HELPER_PATH and POTION_MODEL_PATH values.",
-                nextStep: "Re-run satori install --runtime offline.",
+                nextStep: `Re-run ${satoriCliCommand("install --runtime offline")}.`,
             });
     }
 

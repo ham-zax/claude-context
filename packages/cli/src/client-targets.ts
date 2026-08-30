@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CliError } from "./errors.js";
+import { satoriCliCommand } from "./cli-command.js";
 import {
     LEGACY_SKILL_DIR_NAME,
     SATORI_AGENT_INSTRUCTIONS,
@@ -163,10 +164,10 @@ export function assertAutoClientTargets(
             "Detected clients: none",
             "",
             "Install Codex, Claude Code, or OpenCode, or explicitly choose:",
-            "  satori install --client codex",
-            "  satori install --client claude",
-            "  satori install --client opencode",
-            "  satori install --client all",
+            `  ${satoriCliCommand("install --client codex")}`,
+            `  ${satoriCliCommand("install --client claude")}`,
+            `  ${satoriCliCommand("install --client opencode")}`,
+            `  ${satoriCliCommand("install --client all")}`,
         ].join("\n"),
         2,
     );

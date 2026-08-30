@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { CliError } from "./errors.js";
+import { satoriCliCommand } from "./cli-command.js";
 import { resolveManagedPackageJsonPath } from "./managed-package.js";
 
 interface PackageJsonShape {
@@ -96,7 +97,7 @@ function assertPublishedVersion(
         }
         throw new CliError(
             "E_USAGE",
-            `Cannot install ${ownerPackageName}@${ownerPackageVersion} because required dependency ${packageName}@${version} is not published on npm. Publish ${packageName}@${version} first, then rerun satori install.`,
+            `Cannot install ${ownerPackageName}@${ownerPackageVersion} because required dependency ${packageName}@${version} is not published on npm. Publish ${packageName}@${version} first, then rerun ${satoriCliCommand("install")}.`,
             2
         );
     }

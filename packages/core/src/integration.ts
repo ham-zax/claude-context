@@ -1,4 +1,8 @@
 export {
+    resolveRuntimeOwnerStateDir,
+    resolveSatoriStateRoot,
+} from './config/runtime-state-root';
+export {
     createSharedPublicationRuntime,
 } from './generation/publication-store';
 export type {

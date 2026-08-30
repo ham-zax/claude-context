@@ -297,7 +297,11 @@ export async function executeInstallCommand(
     try {
         const result = applyInstallPlan(plan, preflight);
         if (managedRuntimeCandidate) {
-            pruneManagedRuntimeAfterActivation(homeDir, managedRuntimeCandidate.runtimeRoot);
+            pruneManagedRuntimeAfterActivation(
+                homeDir,
+                managedRuntimeCandidate.runtimeRoot,
+                { ...env, ...preflight?.runtimeEnvironment },
+            );
         }
         return result;
     } finally {

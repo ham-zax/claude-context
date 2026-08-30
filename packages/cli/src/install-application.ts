@@ -529,10 +529,15 @@ export function resolveContainingManagedRuntimeRoot(homeDir: string, packageRoot
     return isPathWithin(runtimeRoot, packageRoot) ? runtimeRoot : null;
 }
 
-export function pruneManagedRuntimeAfterActivation(homeDir: string, currentRuntimeRoot: string): void {
+export function pruneManagedRuntimeAfterActivation(
+    homeDir: string,
+    currentRuntimeRoot: string,
+    env: NodeJS.ProcessEnv = process.env,
+): void {
     const result = pruneManagedRuntimeStore({
         homeDir,
         currentRuntimeRoot,
+        env,
     });
     for (const warning of result.warnings) {
         console.warn(`[RUNTIME-CLEANUP] ${warning}`);

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { POTION_DIMENSION, POTION_MODEL_ID } from "@zokizuan/satori-core";
 import { CliError } from "./errors.js";
+import { satoriCliCommand } from "./cli-command.js";
 import type {
     InstallOfflineReranker,
     InstallVectorStore,
@@ -55,7 +56,7 @@ export function historicalManagedLateOnProfile(
 export function migrationGuidance(profile: string): CliError {
     return new CliError(
         "E_USAGE",
-        `Existing managed LateOn installation uses profile ${profile}, which is treated as historical D16. Run \`satori install --runtime offline --reranker lateon\` to migrate to D32, or \`satori install --runtime offline --reranker none\` to disable LateOn.`,
+        `Existing managed LateOn installation uses profile ${profile}, which is treated as historical D16. Run \`${satoriCliCommand("install --runtime offline --reranker lateon")}\` to migrate to D32, or \`${satoriCliCommand("install --runtime offline --reranker none")}\` to disable LateOn.`,
         2,
     );
 }

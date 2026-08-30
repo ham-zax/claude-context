@@ -22,13 +22,13 @@ import {
     type NetworkPolicy,
     type ResolvedOllamaModelIdentity,
 } from "@zokizuan/satori-core";
+import { resolveSatoriStateRoot } from "@zokizuan/satori-core/integration";
 import {
     LATEON_ACTIVATION_POLICY_IDS,
     LATEON_RUNTIME_PROFILE_IDS,
     type LateOnActivationPolicyId,
     type LateOnRuntimeProfileId,
 } from "./server/lateon-reranker-protocol.js";
-import { resolveSatoriStateRoot } from "./core/runtime-state-root.js";
 
 export type EmbeddingProvider = 'OpenAI' | 'VoyageAI' | 'Gemini' | 'Ollama' | 'Potion';
 export type VectorStoreProvider = 'Milvus' | 'LanceDB';

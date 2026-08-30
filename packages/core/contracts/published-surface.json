@@ -132,6 +132,8 @@
     "SharedPublicationRuntime",
     "SourceFreshnessPathComparison",
     "createSharedPublicationRuntime",
-    "formatRootMutationBlockedMessage"
+    "formatRootMutationBlockedMessage",
+    "resolveRuntimeOwnerStateDir",
+    "resolveSatoriStateRoot"
   ]
 }

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CliError } from "./errors.js";
+import { satoriCliCommand } from "./cli-command.js";
 import type {
     InstallOfflineReranker,
     InstallRuntime,
@@ -100,7 +101,7 @@ export function upgradeRuntimeSelection(
     if (profile !== undefined && profile !== "connected") {
         throw new CliError(
             "E_USAGE",
-            `Managed launcher has unsupported SATORI_RUNTIME_PROFILE=${profile}. Rerun \`satori install\` with an explicit runtime.`,
+            `Managed launcher has unsupported SATORI_RUNTIME_PROFILE=${profile}. Rerun \`${satoriCliCommand("install")}\` with an explicit runtime.`,
             2,
         );
     }
@@ -133,7 +134,7 @@ export async function executeManagedRuntimeUpgrade(
     if (launcherContent === null) {
         throw new CliError(
             "E_USAGE",
-            "Satori has no managed runtime to upgrade. Run `satori install --client all` first.",
+            `Satori has no managed runtime to upgrade. Run \`${satoriCliCommand("install --client all")}\` first.`,
             2,
         );
     }
@@ -149,7 +150,7 @@ export async function executeManagedRuntimeUpgrade(
         const message = error instanceof Error ? error.message : String(error);
         throw new CliError(
             "E_USAGE",
-            `Managed Satori launcher is invalid: ${message} Rerun \`satori install\` to repair it.`,
+            `Managed Satori launcher is invalid: ${message} Rerun \`${satoriCliCommand("install")}\` to repair it.`,
             2,
         );
     }
@@ -162,7 +163,7 @@ export async function executeManagedRuntimeUpgrade(
     ) {
         throw new CliError(
             "E_USAGE",
-            "Managed Satori launcher has an unsupported command shape. Rerun `satori install` to repair it.",
+            `Managed Satori launcher has an unsupported command shape. Rerun \`${satoriCliCommand("install")}\` to repair it.`,
             2,
         );
     }
@@ -170,7 +171,7 @@ export async function executeManagedRuntimeUpgrade(
     if (!runtimeEntry || !path.isAbsolute(runtimeEntry) || !fs.existsSync(runtimeEntry)) {
         throw new CliError(
             "E_USAGE",
-            "Managed Satori launcher does not target an existing runtime. Rerun `satori install` to repair it.",
+            `Managed Satori launcher does not target an existing runtime. Rerun \`${satoriCliCommand("install")}\` to repair it.`,
             2,
         );
     }
@@ -190,7 +191,7 @@ export async function executeManagedRuntimeUpgrade(
     ) {
         throw new CliError(
             "E_USAGE",
-            "Managed Satori runtime package identity is incomplete. Rerun `satori install` to repair it.",
+            `Managed Satori runtime package identity is incomplete. Rerun \`${satoriCliCommand("install")}\` to repair it.`,
             2,
         );
     }
@@ -239,7 +240,7 @@ export async function executeManagedRuntimeUpgrade(
         const releaseRuntimeMutationLock = acquireManagedRuntimeMutationLock({ homeDir });
         try {
             assertFileContentUnchanged(launcherPath, launcherContent);
-            pruneManagedRuntimeAfterActivation(homeDir, currentRuntimeRoot);
+            pruneManagedRuntimeAfterActivation(homeDir, currentRuntimeRoot, selection.effectiveEnv);
             return {
                 action: "upgrade",
                 status: "up_to_date",
@@ -328,6 +329,13 @@ export async function executeManagedRuntimeUpgrade(
         );
         launcherMutation.assertUnchanged?.();
         launcherMutation.apply();
+        if (candidate) {
+            pruneManagedRuntimeAfterActivation(
+                homeDir,
+                candidate.runtimeRoot,
+                { ...selection.effectiveEnv, ...preflight.runtimeEnvironment },
+            );
+        }
         } catch (error) {
             if (candidate?.newlyInstalled) {
                 fs.rmSync(candidate.runtimeRoot, { recursive: true, force: true });
@@ -338,10 +346,6 @@ export async function executeManagedRuntimeUpgrade(
             const message = error instanceof Error ? error.message : String(error);
             throw new CliError("E_INSTALL_PREFLIGHT", `Satori runtime upgrade failed: ${message}`, 1);
         }
-        if (candidate) {
-            pruneManagedRuntimeAfterActivation(homeDir, candidate.runtimeRoot);
-        }
-
         return {
             action: "upgrade",
             status: "upgraded",

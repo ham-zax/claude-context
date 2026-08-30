@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { discoverRuntimeOwnerRegistryPaths } from "./runtime-owner-path.js";
 
 const MANAGED_RUNTIME_DIRECTORY = "mcp-runtime";
 const LEASES_DIRECTORY = ".leases";
@@ -55,6 +56,7 @@ export type ManagedRuntimeRetentionResult = Readonly<{
 export interface ManagedRuntimeRetentionOptions {
     homeDir?: string;
     currentRuntimeRoot: string;
+    env?: NodeJS.ProcessEnv;
     inspectProcess?: (pid: number) => ProcessIdentity | null;
     now?: () => number;
 }
@@ -285,52 +287,54 @@ function collectLeaseProtectedRoots(
 
 function collectLiveRuntimeOwnerVersions(
     homeDir: string,
+    env: NodeJS.ProcessEnv,
     inspectProcess: (pid: number) => ProcessIdentity | null,
 ): { versions: Set<string>; warnings: string[]; unsafe: boolean } {
-    const ownersPath = path.join(homeDir, ".satori", "runtime", "owners.json");
     const versions = new Set<string>();
-    if (!fs.existsSync(ownersPath)) {
-        return { versions, warnings: [], unsafe: false };
-    }
-    let parsed: unknown;
-    try {
-        parsed = readJson(ownersPath);
-    } catch (error) {
-        return {
-            versions,
-            warnings: [`Could not read runtime-owner evidence at ${ownersPath}: ${error instanceof Error ? error.message : String(error)}`],
-            unsafe: true,
-        };
-    }
-    if (!isRecord(parsed) || parsed.formatVersion !== "v1" || !Array.isArray(parsed.owners)) {
-        return {
-            versions,
-            warnings: [`Runtime-owner evidence is malformed at ${ownersPath}.`],
-            unsafe: true,
-        };
-    }
-    for (const value of parsed.owners) {
-        if (
-            !isRecord(value)
-            || !Number.isSafeInteger(value.pid)
-            || Number(value.pid) <= 0
-            || typeof value.satoriVersion !== "string"
-        ) {
+    for (const ownersPath of discoverRuntimeOwnerRegistryPaths(homeDir, env)) {
+        if (!fs.existsSync(ownersPath)) {
+            continue;
+        }
+        let parsed: unknown;
+        try {
+            parsed = readJson(ownersPath);
+        } catch (error) {
             return {
                 versions,
-                warnings: [`Runtime-owner evidence contains an invalid owner at ${ownersPath}.`],
+                warnings: [`Could not read runtime-owner evidence at ${ownersPath}: ${error instanceof Error ? error.message : String(error)}`],
                 unsafe: true,
             };
         }
-        const owner: RuntimeOwnerRecord = {
-            pid: Number(value.pid),
-            ...(typeof value.processStartTime === "string"
-                ? { processStartTime: value.processStartTime }
-                : {}),
-            satoriVersion: value.satoriVersion,
-        };
-        if (processIdentityMatches(owner, inspectProcess(owner.pid))) {
-            versions.add(owner.satoriVersion);
+        if (!isRecord(parsed) || parsed.formatVersion !== "v1" || !Array.isArray(parsed.owners)) {
+            return {
+                versions,
+                warnings: [`Runtime-owner evidence is malformed at ${ownersPath}.`],
+                unsafe: true,
+            };
+        }
+        for (const value of parsed.owners) {
+            if (
+                !isRecord(value)
+                || !Number.isSafeInteger(value.pid)
+                || Number(value.pid) <= 0
+                || typeof value.satoriVersion !== "string"
+            ) {
+                return {
+                    versions,
+                    warnings: [`Runtime-owner evidence contains an invalid owner at ${ownersPath}.`],
+                    unsafe: true,
+                };
+            }
+            const owner: RuntimeOwnerRecord = {
+                pid: Number(value.pid),
+                ...(typeof value.processStartTime === "string"
+                    ? { processStartTime: value.processStartTime }
+                    : {}),
+                satoriVersion: value.satoriVersion,
+            };
+            if (processIdentityMatches(owner, inspectProcess(owner.pid))) {
+                versions.add(owner.satoriVersion);
+            }
         }
     }
     return { versions, warnings: [], unsafe: false };
@@ -541,6 +545,7 @@ export function pruneManagedRuntimeStore(
     const homeDir = options.homeDir ?? os.homedir();
     const storageRoot = runtimeStorageRoot(homeDir);
     const inspectProcess = options.inspectProcess ?? inspectProcessDefault;
+    const env = options.env ?? process.env;
     const now = options.now ?? (() => Date.now());
     if (!fs.existsSync(storageRoot)) {
         return { removedRuntimeRoots: [], warnings: [] };
@@ -559,7 +564,7 @@ export function pruneManagedRuntimeStore(
                 return;
             }
             const leaseEvidence = collectLeaseProtectedRoots(storageRoot, inspectProcess);
-            const ownerEvidence = collectLiveRuntimeOwnerVersions(homeDir, inspectProcess);
+            const ownerEvidence = collectLiveRuntimeOwnerVersions(homeDir, env, inspectProcess);
             const hostEvidence = collectSharedRuntimeProtectedRoots(homeDir, storageRoot, inspectProcess);
             warnings.push(...leaseEvidence.warnings, ...ownerEvidence.warnings, ...hostEvidence.warnings);
             if (leaseEvidence.unsafe || ownerEvidence.unsafe || hostEvidence.unsafe) {

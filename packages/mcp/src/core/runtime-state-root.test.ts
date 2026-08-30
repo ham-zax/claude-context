@@ -7,7 +7,7 @@ import test from "node:test";
 import {
     resolveRuntimeOwnerStateDir,
     resolveSatoriStateRoot,
-} from "./runtime-state-root.js";
+} from "@zokizuan/satori-core/integration";
 
 const HOME = "/home/tester";
 

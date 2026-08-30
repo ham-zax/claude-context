@@ -1,6 +1,8 @@
+import path from "node:path";
 import type { CliWriters } from "./format.js";
 import type { InstallCommandResult } from "./install.js";
 import type { InstallPostflightCheck, InstallPostflightResult } from "./install-postflight.js";
+import { satoriCliCommand } from "./cli-command.js";
 
 const CLIENT_LABELS = {
     codex: "Codex",
@@ -37,6 +39,18 @@ function runtimeSummary(result: InstallCommandResult): string | null {
     const values = [profile ? titleCase(profile) : null, provider, vectorStore]
         .filter((value): value is string => Boolean(value));
     return values.length > 0 ? values.join(" · ") : null;
+}
+
+function rerankerSummary(result: InstallCommandResult): string | null {
+    if (result.action !== "install") return null;
+    const environment = result.runtimeEnvironment ?? {};
+    const provider = environment.SATORI_RERANKER_PROVIDER?.trim();
+    if (!provider) return null;
+    if (provider === "none") return "None";
+    if (provider !== "lateon") return titleCase(provider);
+    const modelPath = environment.SATORI_LATEON_MODEL_PATH?.trim();
+    const modelName = modelPath ? path.basename(modelPath).split("@")[0] : null;
+    return modelName ? `LateOn · ${modelName}` : "LateOn";
 }
 
 function clientLabels(result: InstallCommandResult): string[] {
@@ -76,6 +90,8 @@ export function formatInstallText(
     const lines = [heading];
     const runtime = runtimeSummary(result);
     if (runtime) lines.push("", `Runtime: ${runtime}`);
+    const reranker = rerankerSummary(result);
+    if (reranker) lines.push(`Reranker: ${reranker}`);
     const version = packageVersion(result.packageSpecifier);
     if (version) lines.push(`MCP package: ${version}`);
     const clients = clientLabels(result);
@@ -91,7 +107,9 @@ export function formatInstallText(
     const restart = restartInstruction(result);
     if (restart) lines.push("", restart);
     if (postflight?.status !== undefined && postflight.status !== "ok") {
-        lines.push("Run `satori doctor --verbose` for diagnostic details.");
+        lines.push(`Run \`${satoriCliCommand("doctor --verbose")}\` for diagnostic details.`);
+    } else if (result.action === "install" && !result.dryRun) {
+        lines.push(`Update later with \`${satoriCliCommand("update")}\`.`);
     }
     return `${lines.join("\n")}\n`;
 }

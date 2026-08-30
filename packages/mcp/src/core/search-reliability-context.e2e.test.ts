@@ -12,6 +12,7 @@ import {
     type Reranker,
     type RerankResult,
 } from "@zokizuan/satori-core";
+import { resolveRuntimeOwnerStateDir } from "@zokizuan/satori-core/integration";
 import type { IndexFingerprint } from "../config.js";
 import { DEFAULT_MANAGE_RETRY_AFTER_MS } from "../config.js";
 import type { CapabilityResolver } from "./capabilities.js";
@@ -19,7 +20,6 @@ import {
     RuntimeOwnerRegistry,
     buildRuntimeOwnerIdentity,
 } from "./runtime-owner.js";
-import { resolveRuntimeOwnerStateDir } from "./runtime-state-root.js";
 import {
     runSearchExecution,
     type SearchDiagnostics,

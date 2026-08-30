@@ -1710,7 +1710,7 @@ test("managed runtime upgrade requires an existing managed installation", async 
                 mcpVersion: "6.2.0",
                 coreVersion: "3.1.0",
             }, { homeDir }),
-            /Run `satori install --client all` first/,
+            /Run `npx -y @zokizuan\/satori-cli@latest install --client all` first/,
         );
         assert.deepEqual(fs.readdirSync(homeDir), []);
     });
@@ -3142,7 +3142,7 @@ test("auto install fails before runtime, model, preflight, or launcher work when
             }),
             (error: unknown) => error instanceof CliError
                 && error.token === "E_NO_CLIENTS_DETECTED"
-                && error.message.includes("satori install --client all"),
+                && error.message.includes("npx -y @zokizuan/satori-cli@latest install --client all"),
         );
 
         assert.equal(runtimeInstallCalls, 0);
@@ -3194,7 +3194,7 @@ test("auto install revalidates client detection after preflight and removes its 
             }),
             (error: unknown) => error instanceof CliError
                 && error.token === "E_NO_CLIENTS_DETECTED"
-                && error.message.includes("satori install --client all"),
+                && error.message.includes("npx -y @zokizuan/satori-cli@latest install --client all"),
         );
 
         assert.equal(preflightCalls, 1);

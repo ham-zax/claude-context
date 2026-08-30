@@ -15,7 +15,7 @@ import {
     type ProcessSnapshot,
     type RuntimeOwnerRecord,
 } from './runtime-owner.js';
-import { resolveRuntimeOwnerStateDir } from './runtime-state-root.js';
+import { resolveRuntimeOwnerStateDir } from '@zokizuan/satori-core/integration';
 
 const FINGERPRINT: IndexFingerprint = {
     embeddingProvider: 'VoyageAI',

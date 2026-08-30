@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
 import type { ListToolsResult } from "./client.js";
 import { connectCliMcpSession } from "./client.js";
 import { CliError } from "./errors.js";
@@ -10,6 +9,7 @@ import {
     verifyManagedClientConfigurations,
 } from "./install.js";
 import { evaluateStaticRuntimeConfig } from "./runtime-config.js";
+import { resolveRuntimeOwnerRegistryPath } from "./runtime-owner-path.js";
 
 const EXPECTED_TOOL_NAMES = [
     "manage_index",
@@ -95,10 +95,6 @@ function overallStatus(checks: InstallPostflightCheck[]): InstallPostflightResul
         return "warning";
     }
     return "ok";
-}
-
-function ownerRegistryPath(homeDir: string): string {
-    return path.join(homeDir, ".satori", "runtime", "owners.json");
 }
 
 function readOwners(filePath: string): RuntimeOwnerRecord[] {
@@ -217,7 +213,10 @@ export async function runInstallPostflight(options: InstallPostflightOptions): P
         return { status: overallStatus(checks), checks };
     }
 
-    const registryPath = ownerRegistryPath(options.homeDir);
+    const registryPath = resolveRuntimeOwnerRegistryPath(options.homeDir, {
+        ...options.env,
+        ...options.installResult.runtimeEnvironment,
+    });
     let baselineOwnerIds: Set<string>;
     try {
         baselineOwnerIds = new Set(readOwners(registryPath).map((owner) => owner.ownerId));

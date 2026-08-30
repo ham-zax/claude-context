@@ -89,13 +89,13 @@ test("prunes every valid unreferenced runtime and keeps the current runtime", as
     });
 });
 
-test("keeps all roots matching a live legacy runtime owner version", async () => {
+test("keeps all roots matching a live runtime owner version", async () => {
     await withTempHome((homeDir) => {
         const liveStable = writeRuntime(homeDir, "6.2.0");
         const liveGeneration = writeRuntime(homeDir, "6.2.0", ".generation-test");
         const stale = writeRuntime(homeDir, "6.3.0");
         const current = writeRuntime(homeDir, "6.7.0");
-        const ownersPath = path.join(homeDir, ".satori", "runtime", "owners.json");
+        const ownersPath = path.join(homeDir, ".satori", "runtime-owner", "owners.json");
         fs.mkdirSync(path.dirname(ownersPath), { recursive: true });
         fs.writeFileSync(ownersPath, JSON.stringify({
             formatVersion: "v1",
@@ -121,11 +121,11 @@ test("keeps all roots matching a live legacy runtime owner version", async () =>
     });
 });
 
-test("removes a runtime after its legacy owner process exits", async () => {
+test("removes a runtime after its owner process exits", async () => {
     await withTempHome((homeDir) => {
         const stale = writeRuntime(homeDir, "6.2.0");
         const current = writeRuntime(homeDir, "6.7.0");
-        const ownersPath = path.join(homeDir, ".satori", "runtime", "owners.json");
+        const ownersPath = path.join(homeDir, ".satori", "runtime-owner", "owners.json");
         fs.mkdirSync(path.dirname(ownersPath), { recursive: true });
         fs.writeFileSync(ownersPath, JSON.stringify({
             formatVersion: "v1",
@@ -225,7 +225,7 @@ test("malformed ownership evidence prevents destructive cleanup", async () => {
     await withTempHome((homeDir) => {
         const stale = writeRuntime(homeDir, "6.2.0");
         const current = writeRuntime(homeDir, "6.7.0");
-        const ownersPath = path.join(homeDir, ".satori", "runtime", "owners.json");
+        const ownersPath = path.join(homeDir, ".satori", "runtime-owner", "owners.json");
         fs.mkdirSync(path.dirname(ownersPath), { recursive: true });
         fs.writeFileSync(ownersPath, "{broken", "utf8");
 
