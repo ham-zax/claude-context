@@ -145,13 +145,28 @@ export function readLocalReleaseGraph(cwd = process.cwd()) {
 
   const mcpDependencies = packages.mcp.manifest.dependencies || {};
   const cliDependencies = packages.cli.manifest.dependencies || {};
+  const cliRuntime = packages.cli.manifest.satoriManagedRuntime || {};
   if (mcpDependencies['@zokizuan/satori-core'] !== 'workspace:*') {
     throw new Error(`MCP source dependency on @zokizuan/satori-core must remain workspace:*; received ${JSON.stringify(mcpDependencies['@zokizuan/satori-core'])}`);
   }
   for (const dependency of ['@zokizuan/satori-core', '@zokizuan/satori-mcp']) {
-    if (cliDependencies[dependency] !== 'workspace:*') {
-      throw new Error(`CLI source dependency on ${dependency} must remain workspace:*; received ${JSON.stringify(cliDependencies[dependency])}`);
+    if (Object.prototype.hasOwnProperty.call(cliDependencies, dependency)) {
+      throw new Error(`CLI bootstrap must not install managed runtime dependency ${dependency}.`);
     }
+  }
+  if (cliRuntime.mcp !== packages.mcp.versionString || cliRuntime.core !== packages.core.versionString) {
+    throw new Error(
+      `CLI satoriManagedRuntime must target MCP ${packages.mcp.versionString} and Core ${packages.core.versionString}; `
+      + `received MCP ${JSON.stringify(cliRuntime.mcp)} and Core ${JSON.stringify(cliRuntime.core)}`
+    );
+  }
+  if (
+    cliRuntime.lanceDb !== packages.core.manifest.dependencies?.['@lancedb/lancedb']
+    || cliRuntime.oxcParser !== packages.core.manifest.dependencies?.['oxc-parser']
+    || cliRuntime.lateOn?.transformers !== packages.mcp.manifest.dependencies?.['@huggingface/transformers']
+    || cliRuntime.lateOn?.onnxruntimeNode !== packages.mcp.manifest.dependencies?.['onnxruntime-node']
+  ) {
+    throw new Error('CLI satoriManagedRuntime native/runtime versions are stale relative to Core/MCP manifests.');
   }
 
   const serverJson = readJsonFile(path.join(cwd, 'server.json'), 'server.json');
@@ -193,19 +208,18 @@ export function validatePackedDependencyGraph(input) {
   }
 
   const edges = [
-    { from: 'mcp', to: 'core' },
-    { from: 'cli', to: 'mcp' },
-    { from: 'cli', to: 'core' },
+    { from: 'mcp', to: 'core', kind: 'dependency', actual: packedManifests.mcp.dependencies?.['@zokizuan/satori-core'] },
+    { from: 'cli', to: 'mcp', kind: 'managed-runtime', actual: packedManifests.cli.satoriManagedRuntime?.mcp },
+    { from: 'cli', to: 'core', kind: 'managed-runtime', actual: packedManifests.cli.satoriManagedRuntime?.core },
   ];
   for (const edge of edges) {
     const fromMeta = RELEASE_PACKAGES[edge.from];
     const toMeta = RELEASE_PACKAGES[edge.to];
-    const dependencies = packedManifests[edge.from].dependencies || {};
-    const actual = dependencies[toMeta.name];
     const expected = localVersions[edge.to];
-    if (actual !== expected) {
+    if (edge.actual !== expected) {
+      const contract = edge.from === 'cli' ? 'satoriManagedRuntime target' : 'dependency';
       throw new Error(
-        `Packed ${fromMeta.name} dependency ${toMeta.name} must be exact version ${expected}; received ${JSON.stringify(actual)}`
+        `Packed ${fromMeta.name} ${contract} ${toMeta.name} must be exact version ${expected}; received ${JSON.stringify(edge.actual)}`
       );
     }
   }
@@ -215,6 +229,7 @@ export function validatePackedDependencyGraph(input) {
       edges.map((edge) => ({
         from: edge.from,
         to: edge.to,
+        kind: edge.kind,
         version: localVersions[edge.to],
       }))
     ),

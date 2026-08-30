@@ -18,7 +18,7 @@ function packageLabel(packageName: string): string {
 }
 
 function packageSourceLabel(packageName: string): string {
-    return packageName.endsWith("-cli") ? "CLI package source" : "CLI-bundled package source";
+    return packageName.endsWith("-cli") ? "CLI package source" : "CLI release metadata";
 }
 
 function checkValue(result: DoctorResult, name: string): string | null {

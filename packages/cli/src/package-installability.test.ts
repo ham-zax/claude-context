@@ -19,14 +19,11 @@ function withTempPackageJson(
     }
 }
 
-test("verifyManagedPackageInstallability rejects unpublished exact runtime dependencies with explicit guidance", () => {
+test("verifyManagedPackageInstallability rejects unpublished managed-runtime targets with explicit guidance", () => {
     withTempPackageJson({
-        name: "@zokizuan/satori-mcp",
-        version: "4.4.1",
-        dependencies: {
-            "@zokizuan/satori-core": "1.1.1",
-            chokidar: "^5.0.0",
-        }
+        name: "@zokizuan/satori-cli",
+        version: "2.0.6",
+        satoriManagedRuntime: { mcp: "4.4.1", core: "1.1.1" },
     }, (packageJsonPath) => {
         const seen: string[] = [];
         assert.throws(
@@ -52,15 +49,11 @@ test("verifyManagedPackageInstallability rejects unpublished exact runtime depen
     });
 });
 
-test("verifyManagedPackageInstallability skips ranged dependencies and returns the managed package specifier", () => {
+test("verifyManagedPackageInstallability verifies exact managed-runtime targets and returns the MCP specifier", () => {
     withTempPackageJson({
-        name: "@zokizuan/satori-mcp",
-        version: "4.4.1",
-        dependencies: {
-            "@zokizuan/satori-core": "1.0.0",
-            chokidar: "^5.0.0",
-            ignore: "~7.0.5",
-        }
+        name: "@zokizuan/satori-cli",
+        version: "2.0.6",
+        satoriManagedRuntime: { mcp: "4.4.1", core: "1.0.0" },
     }, (packageJsonPath) => {
         const seen: string[] = [];
         const packageSpecifier = verifyManagedPackageInstallability({
@@ -78,40 +71,14 @@ test("verifyManagedPackageInstallability skips ranged dependencies and returns t
     });
 });
 
-test("verifyManagedPackageInstallability resolves workspace dependencies to their local package version", () => {
-    const repoTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-workspace-installability-"));
-    try {
-        const mcpDir = path.join(repoTempDir, "packages", "mcp");
-        const coreDir = path.join(repoTempDir, "packages", "core");
-        fs.mkdirSync(mcpDir, { recursive: true });
-        fs.mkdirSync(coreDir, { recursive: true });
-        fs.writeFileSync(path.join(mcpDir, "package.json"), JSON.stringify({
-            name: "@zokizuan/satori-mcp",
-            version: "4.4.1",
-            dependencies: {
-                "@zokizuan/satori-core": "workspace:*",
-            }
-        }, null, 2));
-        fs.writeFileSync(path.join(coreDir, "package.json"), JSON.stringify({
-            name: "@zokizuan/satori-core",
-            version: "1.1.1",
-        }, null, 2));
-
-        const seen: string[] = [];
-        const packageSpecifier = verifyManagedPackageInstallability({
-            packageJsonPath: path.join(mcpDir, "package.json"),
-            execFileSyncImpl: ((command: string, args: string[]) => {
-                seen.push(`${command} ${args.join(" ")}`);
-                return JSON.stringify(args[1].split("@").at(-1));
-            }) as never,
-        });
-
-        assert.equal(packageSpecifier, "@zokizuan/satori-mcp@4.4.1");
-        assert.deepEqual(seen, [
-            "npm view @zokizuan/satori-mcp@4.4.1 version --json",
-            "npm view @zokizuan/satori-core@1.1.1 version --json",
-        ]);
-    } finally {
-        fs.rmSync(repoTempDir, { recursive: true, force: true });
-    }
+test("verifyManagedPackageInstallability rejects missing runtime metadata", () => {
+    withTempPackageJson({
+        name: "@zokizuan/satori-cli",
+        version: "2.0.6",
+    }, (packageJsonPath) => {
+        assert.throws(
+            () => verifyManagedPackageInstallability({ packageJsonPath }),
+            /satoriManagedRuntime must pin exact MCP and Core versions/,
+        );
+    });
 });

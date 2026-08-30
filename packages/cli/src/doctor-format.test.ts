@@ -39,9 +39,9 @@ test("Doctor uses active runtime authority and labels bundled package sources", 
     const text = formatDoctorText(resultWithActiveRuntime(), { verbose: true });
     assert.match(text, /Doctor runtime: CLI 1\.9\.2 · MCP 6\.7\.0 · Core 3\.5\.0/);
     assert.match(text, /@zokizuan\/satori-cli@1\.9\.2 \(CLI package source\)/);
-    assert.match(text, /@zokizuan\/satori-mcp@6\.8\.1 \(CLI-bundled package source\)/);
-    assert.match(text, /@zokizuan\/satori-core@3\.6\.0 \(CLI-bundled package source\)/);
-    assert.doesNotMatch(text, /@zokizuan\/satori-cli@1\.9\.2 \(CLI-bundled package source\)/);
+    assert.match(text, /@zokizuan\/satori-mcp@6\.8\.1 \(CLI release metadata\)/);
+    assert.match(text, /@zokizuan\/satori-core@3\.6\.0 \(CLI release metadata\)/);
+    assert.doesNotMatch(text, /@zokizuan\/satori-cli@1\.9\.2 \(CLI release metadata\)/);
 });
 
 test("Doctor falls back to the bundle when the launcher is not active", () => {

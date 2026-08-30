@@ -10,8 +10,11 @@ import type {
 } from "./install-contracts.js";
 import {
     probeLanceDbRuntime,
+    verifyBundledPotionRuntime,
+    type InstallPreflightDependencies,
     type InstallPreflightResult,
     type LanceDbModule,
+    type PotionRuntimeCoreModule,
 } from "./install-preflight.js";
 import {
     packageNameFromSpecifier,
@@ -327,6 +330,32 @@ export function exactRuntimeLanceDbProbe(runtimeCommand: ManagedRuntimeCommand):
         await probeLanceDbRuntime(databasePath, {
             loadLanceDb: () => import(pathToFileURL(resolved).href) as Promise<LanceDbModule>,
         });
+    };
+}
+
+type ExactRuntimeCoreModule = PotionRuntimeCoreModule & {
+    resolveOllamaModelIdentity: NonNullable<InstallPreflightDependencies["resolveOllamaIdentity"]>;
+};
+
+async function loadExactRuntimeCore(runtimeCommand: ManagedRuntimeCommand): Promise<ExactRuntimeCoreModule> {
+    const runtimeEntry = runtimeCommand.args[0];
+    const requireFromRuntime = createRequire(runtimeEntry);
+    const resolved = requireFromRuntime.resolve("@zokizuan/satori-core");
+    return import(pathToFileURL(resolved).href) as Promise<ExactRuntimeCoreModule>;
+}
+
+export function exactRuntimePreflightDependencies(
+    runtimeCommand: ManagedRuntimeCommand,
+): Pick<InstallPreflightDependencies, "probeLanceDb" | "verifyPotionRuntime" | "resolveOllamaIdentity"> {
+    return {
+        probeLanceDb: exactRuntimeLanceDbProbe(runtimeCommand),
+        verifyPotionRuntime: (assetsRoot) => verifyBundledPotionRuntime(
+            assetsRoot,
+            () => loadExactRuntimeCore(runtimeCommand),
+        ),
+        resolveOllamaIdentity: async (input) => (
+            await loadExactRuntimeCore(runtimeCommand)
+        ).resolveOllamaModelIdentity(input),
     };
 }
 

@@ -16,18 +16,68 @@ function createWorkspace(files) {
   return cwd;
 }
 
+function sourceCoreManifest(version = '3.6.0') {
+  return {
+    name: '@zokizuan/satori-core',
+    version,
+    dependencies: { '@lancedb/lancedb': '0.31.0', 'oxc-parser': '0.139.0' },
+  };
+}
+
+function sourceMcpManifest(version = '6.8.0') {
+  return {
+    name: '@zokizuan/satori-mcp',
+    version,
+    dependencies: {
+      '@zokizuan/satori-core': 'workspace:*',
+      '@huggingface/transformers': '3.0.2',
+      'onnxruntime-node': '1.19.2',
+    },
+  };
+}
+
+function sourceCliManifest(version = '1.9.0', core = '3.6.0', mcp = '6.8.0') {
+  return {
+    name: '@zokizuan/satori-cli',
+    version,
+    dependencies: {},
+    satoriManagedRuntime: {
+      mcp,
+      core,
+      lanceDb: '0.31.0',
+      oxcParser: '0.139.0',
+      lateOn: { transformers: '3.0.2', onnxruntimeNode: '1.19.2' },
+    },
+  };
+}
+
 function standardWorkspace() {
   return createWorkspace({
-    'packages/core/package.json': { name: '@zokizuan/satori-core', version: '3.6.0' },
+    'packages/core/package.json': {
+      name: '@zokizuan/satori-core',
+      version: '3.6.0',
+      dependencies: { '@lancedb/lancedb': '0.31.0', 'oxc-parser': '0.139.0' },
+    },
     'packages/mcp/package.json': {
       name: '@zokizuan/satori-mcp',
       version: '6.8.0',
-      dependencies: { '@zokizuan/satori-core': 'workspace:*' },
+      dependencies: {
+        '@zokizuan/satori-core': 'workspace:*',
+        '@huggingface/transformers': '3.0.2',
+        'onnxruntime-node': '1.19.2',
+      },
     },
     'packages/cli/package.json': {
       name: '@zokizuan/satori-cli',
       version: '1.9.0',
-      dependencies: { '@zokizuan/satori-core': 'workspace:*', '@zokizuan/satori-mcp': 'workspace:*' },
+      dependencies: {},
+      satoriManagedRuntime: {
+        mcp: '6.8.0',
+        core: '3.6.0',
+        lanceDb: '0.31.0',
+        oxcParser: '0.139.0',
+        lateOn: { transformers: '3.0.2', onnxruntimeNode: '1.19.2' },
+      },
     },
     'server.json': { version: '6.8.0' },
   });
@@ -52,7 +102,8 @@ function localManifests() {
     cli: {
       name: '@zokizuan/satori-cli',
       version: '1.9.0',
-      dependencies: { '@zokizuan/satori-core': '3.6.0', '@zokizuan/satori-mcp': '6.8.0' },
+      dependencies: {},
+      satoriManagedRuntime: { core: '3.6.0', mcp: '6.8.0' },
     },
   };
 }
@@ -252,10 +303,10 @@ test('Core identical but MCP stale through changed Core pin fails', async () => 
   );
 });
 
-test('CLI stale through changed MCP pin fails', async () => {
+test('CLI stale through changed MCP target fails', async () => {
   const cwd = standardWorkspace();
   const manifests = localManifests();
-  const publishedCli = { ...manifests.cli, dependencies: { '@zokizuan/satori-core': '3.6.0', '@zokizuan/satori-mcp': '6.7.0' } };
+  const publishedCli = { ...manifests.cli, satoriManagedRuntime: { core: '3.6.0', mcp: '6.7.0' } };
   const failed = await runCheck({
     cwd,
     publishedByName: {
@@ -269,17 +320,9 @@ test('CLI stale through changed MCP pin fails', async () => {
 
 test('server.json mismatch fails before registry lookup', async () => {
   const cwd = createWorkspace({
-    'packages/core/package.json': { name: '@zokizuan/satori-core', version: '3.6.0' },
-    'packages/mcp/package.json': {
-      name: '@zokizuan/satori-mcp',
-      version: '6.8.0',
-      dependencies: { '@zokizuan/satori-core': 'workspace:*' },
-    },
-    'packages/cli/package.json': {
-      name: '@zokizuan/satori-cli',
-      version: '1.9.0',
-      dependencies: { '@zokizuan/satori-core': 'workspace:*', '@zokizuan/satori-mcp': 'workspace:*' },
-    },
+    'packages/core/package.json': sourceCoreManifest(),
+    'packages/mcp/package.json': sourceMcpManifest(),
+    'packages/cli/package.json': sourceCliManifest(),
     'server.json': { version: '6.7.0' },
   });
   let packCalls = 0;
@@ -309,11 +352,11 @@ test('deterministic package ordering in report output', async () => {
   const mcpRow = lines.findIndex((line) => line.startsWith('@zokizuan/satori-mcp'));
   const cliRow = lines.findIndex((line) => line.startsWith('@zokizuan/satori-cli'));
   assert.ok(coreRow >= 0 && mcpRow > coreRow && cliRow > mcpRow);
-  const graphHeader = lines.findIndex((line) => line === 'Packed dependency graph');
+  const graphHeader = lines.findIndex((line) => line === 'Packed release graph');
   assert.deepEqual(lines.slice(graphHeader + 1, graphHeader + 4), [
-    '@zokizuan/satori-mcp -> @zokizuan/satori-core@3.6.0',
-    '@zokizuan/satori-cli -> @zokizuan/satori-mcp@6.8.0',
-    '@zokizuan/satori-cli -> @zokizuan/satori-core@3.6.0',
+    '@zokizuan/satori-mcp dependency -> @zokizuan/satori-core@3.6.0',
+    '@zokizuan/satori-cli managed runtime -> @zokizuan/satori-mcp@6.8.0',
+    '@zokizuan/satori-cli managed runtime -> @zokizuan/satori-core@3.6.0',
   ]);
 });
 
@@ -328,7 +371,7 @@ test('temporary directories are removed on failure', async () => {
   const cwd = standardWorkspace();
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-check-tmp-'));
   const manifests = localManifests();
-  const publishedCli = { ...manifests.cli, dependencies: { '@zokizuan/satori-core': '3.6.0', '@zokizuan/satori-mcp': '6.7.0' } };
+  const publishedCli = { ...manifests.cli, satoriManagedRuntime: { core: '3.6.0', mcp: '6.7.0' } };
   await assert.rejects(
     runCheck({
       cwd,
@@ -371,7 +414,7 @@ test('failed verification removes its temp directory even when keeping was reque
   const cwd = standardWorkspace();
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-check-tmp-'));
   const manifests = localManifests();
-  const publishedCli = { ...manifests.cli, dependencies: { '@zokizuan/satori-core': '3.6.0', '@zokizuan/satori-mcp': '6.7.0' } };
+  const publishedCli = { ...manifests.cli, satoriManagedRuntime: { core: '3.6.0', mcp: '6.7.0' } };
   await assert.rejects(
     runCheck({
       cwd,
@@ -390,17 +433,9 @@ test('failed verification removes its temp directory even when keeping was reque
 
 test('Core change cannot silently reuse already-published downstream versions', async () => {
   const cwd = createWorkspace({
-    'packages/core/package.json': { name: '@zokizuan/satori-core', version: '3.6.0' },
-    'packages/mcp/package.json': {
-      name: '@zokizuan/satori-mcp',
-      version: '6.7.0',
-      dependencies: { '@zokizuan/satori-core': 'workspace:*' },
-    },
-    'packages/cli/package.json': {
-      name: '@zokizuan/satori-cli',
-      version: '1.8.0',
-      dependencies: { '@zokizuan/satori-core': 'workspace:*', '@zokizuan/satori-mcp': 'workspace:*' },
-    },
+    'packages/core/package.json': sourceCoreManifest('3.6.0'),
+    'packages/mcp/package.json': sourceMcpManifest('6.7.0'),
+    'packages/cli/package.json': sourceCliManifest('1.8.0', '3.6.0', '6.7.0'),
     'server.json': { version: '6.7.0' },
   });
   const localByName = {
@@ -413,13 +448,14 @@ test('Core change cannot silently reuse already-published downstream versions', 
     '@zokizuan/satori-cli': {
       name: '@zokizuan/satori-cli',
       version: '1.8.0',
-      dependencies: { '@zokizuan/satori-core': '3.6.0', '@zokizuan/satori-mcp': '6.7.0' },
+      dependencies: {},
+      satoriManagedRuntime: { core: '3.6.0', mcp: '6.7.0' },
     },
   };
   const publishedMcp = { ...localByName['@zokizuan/satori-mcp'], dependencies: { '@zokizuan/satori-core': '3.5.0' } };
   const publishedCli = {
     ...localByName['@zokizuan/satori-cli'],
-    dependencies: { '@zokizuan/satori-core': '3.5.0', '@zokizuan/satori-mcp': '6.7.0' },
+    satoriManagedRuntime: { core: '3.5.0', mcp: '6.7.0' },
   };
   const { error, lines, tempRoot } = await captureInvalidCheck({
     cwd,
@@ -438,17 +474,9 @@ test('Core change cannot silently reuse already-published downstream versions', 
 
 test('MCP change cannot silently reuse an already-published CLI version', async () => {
   const cwd = createWorkspace({
-    'packages/core/package.json': { name: '@zokizuan/satori-core', version: '3.6.0' },
-    'packages/mcp/package.json': {
-      name: '@zokizuan/satori-mcp',
-      version: '6.8.0',
-      dependencies: { '@zokizuan/satori-core': 'workspace:*' },
-    },
-    'packages/cli/package.json': {
-      name: '@zokizuan/satori-cli',
-      version: '1.8.0',
-      dependencies: { '@zokizuan/satori-core': 'workspace:*', '@zokizuan/satori-mcp': 'workspace:*' },
-    },
+    'packages/core/package.json': sourceCoreManifest('3.6.0'),
+    'packages/mcp/package.json': sourceMcpManifest('6.8.0'),
+    'packages/cli/package.json': sourceCliManifest('1.8.0', '3.6.0', '6.8.0'),
     'server.json': { version: '6.8.0' },
   });
   const localByName = {
@@ -461,12 +489,13 @@ test('MCP change cannot silently reuse an already-published CLI version', async 
     '@zokizuan/satori-cli': {
       name: '@zokizuan/satori-cli',
       version: '1.8.0',
-      dependencies: { '@zokizuan/satori-core': '3.6.0', '@zokizuan/satori-mcp': '6.8.0' },
+      dependencies: {},
+      satoriManagedRuntime: { core: '3.6.0', mcp: '6.8.0' },
     },
   };
   const publishedCli = {
     ...localByName['@zokizuan/satori-cli'],
-    dependencies: { '@zokizuan/satori-core': '3.6.0', '@zokizuan/satori-mcp': '6.7.0' },
+    satoriManagedRuntime: { core: '3.6.0', mcp: '6.7.0' },
   };
   const { error, lines, tempRoot } = await captureInvalidCheck({
     cwd,

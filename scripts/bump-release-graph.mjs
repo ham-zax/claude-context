@@ -197,10 +197,18 @@ export function applyReleaseBump(options) {
   const serverJsonOriginal = fs.readFileSync(serverJsonPath, 'utf8');
 
   try {
+    const targetVersions = Object.fromEntries(plan.entries.map((entry) => [entry.key, entry.to]));
     for (const entry of plan.changed) {
       const manifestPath = path.join(cwd, entry.directory, 'package.json');
       const manifest = JSON.parse(originals.get(manifestPath));
       manifest.version = entry.to;
+      if (entry.key === 'cli') {
+        if (!manifest.satoriManagedRuntime || typeof manifest.satoriManagedRuntime !== 'object') {
+          throw new Error('CLI package.json must define satoriManagedRuntime before release bumping.');
+        }
+        manifest.satoriManagedRuntime.mcp = targetVersions.mcp;
+        manifest.satoriManagedRuntime.core = targetVersions.core;
+      }
       writeJsonAtomically(manifestPath, manifest);
     }
     if (plan.mcpChanged) {

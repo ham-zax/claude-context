@@ -4,12 +4,15 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { CliError } from "./errors.js";
 import { satoriCliCommand } from "./cli-command.js";
-import { resolveManagedPackageJsonPath } from "./managed-package.js";
+import { resolveCliPackageJsonPath } from "./managed-package.js";
 
 interface PackageJsonShape {
     name: string;
     version: string;
-    dependencies?: Record<string, string>;
+    satoriManagedRuntime?: {
+        mcp?: unknown;
+        core?: unknown;
+    };
 }
 
 type ExecFileSyncLike = typeof execFileSync;
@@ -25,7 +28,7 @@ export interface ReleaseSmokeOptions extends PackageInstallabilityOptions {
 }
 
 function resolveDefaultPackageJsonPath(): string {
-    return resolveManagedPackageJsonPath();
+    return resolveCliPackageJsonPath();
 }
 
 function readPackageJson(packageJsonPath: string): PackageJsonShape {
@@ -47,31 +50,6 @@ function npmOutput(error: unknown): string {
         ? (error as { stderr: string }).stderr
         : "";
     return `${stdout}\n${stderr}\n${error.message}`.trim();
-}
-
-function resolveWorkspaceDependencyVersion(packageJsonPath: string, dependencyName: string): string | null {
-    const packageRoot = path.dirname(packageJsonPath);
-    const repoRoot = path.resolve(packageRoot, "..", "..");
-    const packagesRoot = path.join(repoRoot, "packages");
-    if (!fs.existsSync(packagesRoot)) {
-        return null;
-    }
-
-    for (const entry of fs.readdirSync(packagesRoot, { withFileTypes: true })) {
-        if (!entry.isDirectory()) {
-            continue;
-        }
-        const candidatePath = path.join(packagesRoot, entry.name, "package.json");
-        if (!fs.existsSync(candidatePath)) {
-            continue;
-        }
-        const candidate = readPackageJson(candidatePath);
-        if (candidate.name === dependencyName && looksLikeExactVersion(candidate.version)) {
-            return candidate.version;
-        }
-    }
-
-    return null;
 }
 
 function assertPublishedVersion(
@@ -107,24 +85,17 @@ export function verifyManagedPackageInstallability(options: PackageInstallabilit
     const packageJsonPath = options.packageJsonPath ?? resolveDefaultPackageJsonPath();
     const execImpl = options.execFileSyncImpl ?? execFileSync;
     const pkg = readPackageJson(packageJsonPath);
-    const packageSpecifier = `${pkg.name}@${pkg.version}`;
-
-    assertPublishedVersion(pkg.name, pkg.version, pkg.name, pkg.version, execImpl, "self");
-
-    for (const [dependencyName, rawDependencyVersion] of Object.entries(pkg.dependencies ?? {})) {
-        const dependencyVersion = looksLikeExactVersion(rawDependencyVersion)
-            ? rawDependencyVersion
-            : rawDependencyVersion.startsWith("workspace:")
-                ? resolveWorkspaceDependencyVersion(packageJsonPath, dependencyName)
-                : null;
-
-        if (!dependencyVersion) {
-            continue;
-        }
-        assertPublishedVersion(dependencyName, dependencyVersion, pkg.name, pkg.version, execImpl, "dependency");
+    const runtime = pkg.satoriManagedRuntime;
+    const mcpVersion = runtime?.mcp;
+    const coreVersion = runtime?.core;
+    if (!looksLikeExactVersion(String(mcpVersion ?? "")) || !looksLikeExactVersion(String(coreVersion ?? ""))) {
+        throw new CliError("E_USAGE", `Cannot install ${pkg.name}@${pkg.version}: satoriManagedRuntime must pin exact MCP and Core versions.`, 2);
     }
-
-    return packageSpecifier;
+    const mcp = String(mcpVersion);
+    const core = String(coreVersion);
+    assertPublishedVersion("@zokizuan/satori-mcp", mcp, pkg.name, pkg.version, execImpl, "dependency");
+    assertPublishedVersion("@zokizuan/satori-core", core, pkg.name, pkg.version, execImpl, "dependency");
+    return `@zokizuan/satori-mcp@${mcp}`;
 }
 
 export function runPublishedPackageReleaseSmoke(options: ReleaseSmokeOptions = {}): void {

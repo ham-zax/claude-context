@@ -3,7 +3,7 @@ import path from "node:path";
 import {
     resolveRuntimeOwnerStateDir,
     resolveSatoriStateRoot,
-} from "@zokizuan/satori-core/integration";
+} from "./local-runtime-contract.js";
 import { selectedVectorStore } from "./runtime-config.js";
 
 export function resolveRuntimeOwnerRegistryPath(

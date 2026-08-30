@@ -268,8 +268,8 @@ test("runCli version shortcuts report the installed CLI, MCP, and Core set", asy
     ];
     const noLauncherState = (): RuntimeVersionState => ({
         cliVersion: CLI_PACKAGE_VERSION,
-        bundledMcpVersion: MCP_PACKAGE_VERSION,
-        bundledCoreVersion: CORE_PACKAGE_VERSION,
+        releaseMcpVersion: MCP_PACKAGE_VERSION,
+        releaseCoreVersion: CORE_PACKAGE_VERSION,
         activeManagedMcpVersion: null,
         activeManagedCoreVersion: null,
         activeLauncherPath: null,
@@ -287,7 +287,7 @@ test("runCli version shortcuts report the installed CLI, MCP, and Core set", asy
     assert.equal(textExitCode, 0);
     assert.equal(
         textIo.read().stdout,
-        `Satori\n\nCLI: ${CLI_PACKAGE_VERSION}\nBundled release: MCP ${MCP_PACKAGE_VERSION} · Core ${CORE_PACKAGE_VERSION}\nManaged launcher: not installed\n`,
+        `Satori\n\nCLI: ${CLI_PACKAGE_VERSION}\nCLI release target: MCP ${MCP_PACKAGE_VERSION} · Core ${CORE_PACKAGE_VERSION}\nManaged launcher: not installed\n`,
     );
     assert.equal(textIo.read().stderr, "");
 
@@ -308,8 +308,8 @@ test("runCli version shortcuts report the installed CLI, MCP, and Core set", asy
         cliVersion: CLI_PACKAGE_VERSION,
         mcpVersion: MCP_PACKAGE_VERSION,
         coreVersion: CORE_PACKAGE_VERSION,
-        bundledMcpVersion: MCP_PACKAGE_VERSION,
-        bundledCoreVersion: CORE_PACKAGE_VERSION,
+        releaseMcpVersion: MCP_PACKAGE_VERSION,
+        releaseCoreVersion: CORE_PACKAGE_VERSION,
         activeManagedMcpVersion: null,
         activeManagedCoreVersion: null,
         activeLauncherPath: null,
@@ -330,8 +330,8 @@ test("runCli version distinguishes the bundled release from the active managed r
         versionResolver: () => versions,
         runtimeStateResolver: () => ({
             cliVersion: CLI_PACKAGE_VERSION,
-            bundledMcpVersion: MCP_PACKAGE_VERSION,
-            bundledCoreVersion: CORE_PACKAGE_VERSION,
+            releaseMcpVersion: MCP_PACKAGE_VERSION,
+            releaseCoreVersion: CORE_PACKAGE_VERSION,
             activeManagedMcpVersion: "6.7.0",
             activeManagedCoreVersion: "3.5.0",
             activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
@@ -341,7 +341,7 @@ test("runCli version distinguishes the bundled release from the active managed r
     assert.equal(exitCode, 0);
     assert.equal(
         io.read().stdout,
-        `Satori\n\nCLI: ${CLI_PACKAGE_VERSION}\nBundled release: MCP ${MCP_PACKAGE_VERSION} · Core ${CORE_PACKAGE_VERSION}\nActive managed runtime: MCP 6.7.0 · Core 3.5.0\nManaged launcher: /home/test/.satori/bin/satori-mcp.js\n\nCLI-bundled release and active managed runtime differ.\n`,
+        `Satori\n\nCLI: ${CLI_PACKAGE_VERSION}\nCLI release target: MCP ${MCP_PACKAGE_VERSION} · Core ${CORE_PACKAGE_VERSION}\nActive managed runtime: MCP 6.7.0 · Core 3.5.0\nManaged launcher: /home/test/.satori/bin/satori-mcp.js\n\nCLI release target and active managed runtime differ.\n`,
     );
 });
 
@@ -359,8 +359,8 @@ test("runCli version omits the bundle line when bundled and active runtimes matc
         versionResolver: () => versions,
         runtimeStateResolver: () => ({
             cliVersion: CLI_PACKAGE_VERSION,
-            bundledMcpVersion: MCP_PACKAGE_VERSION,
-            bundledCoreVersion: CORE_PACKAGE_VERSION,
+            releaseMcpVersion: MCP_PACKAGE_VERSION,
+            releaseCoreVersion: CORE_PACKAGE_VERSION,
             activeManagedMcpVersion: MCP_PACKAGE_VERSION,
             activeManagedCoreVersion: CORE_PACKAGE_VERSION,
             activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
@@ -388,8 +388,8 @@ test("runCli version shows both runtimes when only Core differs", async () => {
         versionResolver: () => versions,
         runtimeStateResolver: () => ({
             cliVersion: CLI_PACKAGE_VERSION,
-            bundledMcpVersion: MCP_PACKAGE_VERSION,
-            bundledCoreVersion: CORE_PACKAGE_VERSION,
+            releaseMcpVersion: MCP_PACKAGE_VERSION,
+            releaseCoreVersion: CORE_PACKAGE_VERSION,
             activeManagedMcpVersion: MCP_PACKAGE_VERSION,
             activeManagedCoreVersion: "3.5.0",
             activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
@@ -398,9 +398,9 @@ test("runCli version shows both runtimes when only Core differs", async () => {
     });
     assert.equal(exitCode, 0);
     const stdout = io.read().stdout;
-    assert.match(stdout, new RegExp(`Bundled release: MCP ${escapeRegExp(MCP_PACKAGE_VERSION)} · Core ${escapeRegExp(CORE_PACKAGE_VERSION)}`));
+    assert.match(stdout, new RegExp(`CLI release target: MCP ${escapeRegExp(MCP_PACKAGE_VERSION)} · Core ${escapeRegExp(CORE_PACKAGE_VERSION)}`));
     assert.match(stdout, new RegExp(`Active managed runtime: MCP ${escapeRegExp(MCP_PACKAGE_VERSION)} · Core ${escapeRegExp("3.5.0")}`));
-    assert.match(stdout, /CLI-bundled release and active managed runtime differ\./);
+    assert.match(stdout, /CLI release target and active managed runtime differ\./);
 });
 
 test("runCli version JSON never combines active MCP with bundled Core", async () => {
@@ -417,8 +417,8 @@ test("runCli version JSON never combines active MCP with bundled Core", async ()
         versionResolver: () => versions,
         runtimeStateResolver: () => ({
             cliVersion: CLI_PACKAGE_VERSION,
-            bundledMcpVersion: MCP_PACKAGE_VERSION,
-            bundledCoreVersion: CORE_PACKAGE_VERSION,
+            releaseMcpVersion: MCP_PACKAGE_VERSION,
+            releaseCoreVersion: CORE_PACKAGE_VERSION,
             activeManagedMcpVersion: "6.8.1",
             activeManagedCoreVersion: null,
             activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
@@ -429,7 +429,7 @@ test("runCli version JSON never combines active MCP with bundled Core", async ()
     const parsed = JSON.parse(io.read().stdout);
     assert.equal(parsed.mcpVersion, "6.8.1");
     assert.equal(parsed.coreVersion, null);
-    assert.equal(parsed.bundledCoreVersion, CORE_PACKAGE_VERSION);
+    assert.equal(parsed.releaseCoreVersion, CORE_PACKAGE_VERSION);
 });
 
 test("runCli version reports a malformed launcher without claiming an active runtime", async () => {
@@ -446,8 +446,8 @@ test("runCli version reports a malformed launcher without claiming an active run
         versionResolver: () => versions,
         runtimeStateResolver: () => ({
             cliVersion: CLI_PACKAGE_VERSION,
-            bundledMcpVersion: MCP_PACKAGE_VERSION,
-            bundledCoreVersion: CORE_PACKAGE_VERSION,
+            releaseMcpVersion: MCP_PACKAGE_VERSION,
+            releaseCoreVersion: CORE_PACKAGE_VERSION,
             activeManagedMcpVersion: null,
             activeManagedCoreVersion: null,
             activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
@@ -1168,6 +1168,8 @@ test("runCli records only privacy-safe local measurements for direct tool calls"
             writeStdout: io.writeStdout,
             writeStderr: io.writeStderr,
             env: { HOME: homeDir },
+            serverCommand: process.execPath,
+            serverArgs: [],
             diagnosticsPath: path.join(homeDir, ".satori", "diagnostics", "events.jsonl"),
             nowMs: (() => {
                 const values = [100, 125];

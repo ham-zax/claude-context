@@ -49,9 +49,10 @@ export function printReleaseGraphReport(report, output) {
     );
   }
   output('');
-  output('Packed dependency graph');
+  output('Packed release graph');
   for (const edge of report.graphEdges) {
-    output(`${RELEASE_PACKAGES[edge.from].name} -> ${RELEASE_PACKAGES[edge.to].name}@${edge.version}`);
+    const relation = edge.kind === 'managed-runtime' ? 'managed runtime' : 'dependency';
+    output(`${RELEASE_PACKAGES[edge.from].name} ${relation} -> ${RELEASE_PACKAGES[edge.to].name}@${edge.version}`);
   }
   output('');
 

@@ -4,14 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import type { ResolvedOllamaModelIdentity } from "@zokizuan/satori-core";
+import { assertLocalOnlyEndpoint } from "./local-runtime-contract.js";
 import {
-    assertNetworkPolicyAllowsEndpoint,
-    resolveOllamaModelIdentity,
-    type ResolvedOllamaModelIdentity,
-} from "@zokizuan/satori-core";
-import {
-    readManagedPackageJson,
-    resolveManagedPackageJsonPath,
+    readManagedRuntimeRelease,
     resolveManagedPackageSpecifier,
 } from "./managed-package.js";
 import {
@@ -47,8 +43,8 @@ export interface DoctorPackageVersion {
 
 export interface RuntimeVersionState {
     cliVersion: string;
-    bundledMcpVersion: string | null;
-    bundledCoreVersion: string | null;
+    releaseMcpVersion: string | null;
+    releaseCoreVersion: string | null;
     activeManagedMcpVersion: string | null;
     activeManagedCoreVersion: string | null;
     activeLauncherPath: string | null;
@@ -124,7 +120,10 @@ export interface DoctorOptions {
     inspectManagedClients?: (homeDir: string) => ReturnType<typeof inspectManagedClientConfigurations>;
     /** Override local diagnostics event log path. */
     diagnosticsPath?: string;
-    resolveOllamaIdentity?: typeof resolveOllamaModelIdentity;
+    resolveOllamaIdentity?: (input: {
+        model: string;
+        host?: string;
+    }) => Promise<Readonly<ResolvedOllamaModelIdentity>>;
     /** Read-only exact-runtime LanceDB module load override. */
     loadManagedLanceDb?: (runtimeTarget: string) => Promise<void>;
 }
@@ -396,108 +395,33 @@ function readJsonVersion(packageJsonPath: string): { name: string; version: stri
     return null;
 }
 
-function resolvePackageJsonPath(packageName: string, monorepoSegment: string): { path: string; source: string } | null {
-    try {
-        const resolved = requireFromHere.resolve(`${packageName}/package.json`);
-        return { path: resolved, source: resolved };
-    } catch {
-        // fall through to monorepo sibling layout (dev / workspace)
-    }
-
-    const currentFile = fileURLToPath(import.meta.url);
-    // packages/cli/src|dist → packages/<segment>/package.json
-    const monorepoPath = path.resolve(path.dirname(currentFile), "..", "..", monorepoSegment, "package.json");
-    if (fs.existsSync(monorepoPath)) {
-        return { path: monorepoPath, source: monorepoPath };
-    }
-    return null;
-}
-
-/**
- * Resolve @zokizuan/satori-core via the installed MCP package.
- * Production installs often nest core under mcp/node_modules; CLI cannot see it via its own require.
- */
-export function resolveCorePackageVersionViaMcp(options?: {
-    /** Test override: absolute path to MCP package.json used as createRequire root. */
-    mcpPackageJsonPath?: string;
-}): DoctorPackageVersion | null {
-    try {
-        const mcpPackageJsonPath = options?.mcpPackageJsonPath ?? resolveManagedPackageJsonPath();
-        const requireFromMcp = createRequire(mcpPackageJsonPath);
-        const corePackageJsonPath = requireFromMcp.resolve("@zokizuan/satori-core/package.json");
-        const info = readJsonVersion(corePackageJsonPath);
-        if (!info) {
-            return null;
-        }
-        return { name: info.name, version: info.version, source: corePackageJsonPath };
-    } catch {
-        return null;
-    }
-}
-
 /**
  * Resolve the installed Satori package version set for operator support.
  * Independent package versions are expected; this is not a lockstep matrix.
  */
 export function resolveInstalledPackageVersions(): DoctorPackageVersion[] {
-    const entries: Array<{ packageName: string; monorepoSegment: string; preferredRead?: () => DoctorPackageVersion | null }> = [
+    const currentFile = fileURLToPath(import.meta.url);
+    const cliPackageJson = path.resolve(path.dirname(currentFile), "..", "package.json");
+    const cliInfo = readJsonVersion(cliPackageJson);
+    const release = readManagedRuntimeRelease();
+    const releaseSource = `${cliPackageJson}#satoriManagedRuntime`;
+    return [
         {
-            packageName: "@zokizuan/satori-cli",
-            monorepoSegment: "cli",
-            preferredRead: () => {
-                const currentFile = fileURLToPath(import.meta.url);
-                const cliPackageJson = path.resolve(path.dirname(currentFile), "..", "package.json");
-                const info = readJsonVersion(cliPackageJson);
-                if (!info) {
-                    return null;
-                }
-                return { name: info.name, version: info.version, source: cliPackageJson };
-            },
+            name: "@zokizuan/satori-cli",
+            version: cliInfo?.version ?? null,
+            source: cliPackageJson,
         },
         {
-            packageName: "@zokizuan/satori-mcp",
-            monorepoSegment: "mcp",
-            preferredRead: () => {
-                try {
-                    const pkg = readManagedPackageJson();
-                    const name = typeof pkg.name === "string" ? pkg.name : null;
-                    const version = typeof pkg.version === "string" ? pkg.version : null;
-                    if (!name || !version) {
-                        return null;
-                    }
-                    const source = resolvePackageJsonPath(name, "mcp")?.source
-                        || "managed-package";
-                    return { name, version, source };
-                } catch {
-                    return null;
-                }
-            },
+            name: "@zokizuan/satori-mcp",
+            version: release.mcp,
+            source: releaseSource,
         },
         {
-            packageName: "@zokizuan/satori-core",
-            monorepoSegment: "core",
-            // Prefer MCP-rooted resolution so nested production installs do not false-warn.
-            preferredRead: () => resolveCorePackageVersionViaMcp(),
+            name: "@zokizuan/satori-core",
+            version: release.core,
+            source: releaseSource,
         },
     ];
-
-    return entries.map(({ packageName, monorepoSegment, preferredRead }) => {
-        if (preferredRead) {
-            const preferred = preferredRead();
-            if (preferred) {
-                return preferred;
-            }
-        }
-        const resolved = resolvePackageJsonPath(packageName, monorepoSegment);
-        if (!resolved) {
-            return { name: packageName, version: null, source: "unresolved" };
-        }
-        const info = readJsonVersion(resolved.path);
-        if (!info) {
-            return { name: packageName, version: null, source: resolved.source };
-        }
-        return { name: info.name, version: info.version, source: resolved.source };
-    });
 }
 
 type ManagedLauncherStatus =
@@ -613,8 +537,8 @@ export function resolveRuntimeVersionState(
     const active = resolveActiveManagedRuntime(homeDir, launcherPath);
     return {
         cliVersion: installedPackageVersion(packageVersions, "@zokizuan/satori-cli") ?? "unknown",
-        bundledMcpVersion: installedPackageVersion(packageVersions, "@zokizuan/satori-mcp"),
-        bundledCoreVersion: installedPackageVersion(packageVersions, "@zokizuan/satori-core"),
+        releaseMcpVersion: installedPackageVersion(packageVersions, "@zokizuan/satori-mcp"),
+        releaseCoreVersion: installedPackageVersion(packageVersions, "@zokizuan/satori-core"),
         activeManagedMcpVersion: active?.status === "active" ? active.mcpVersion : null,
         activeManagedCoreVersion: active?.status === "active" ? active.coreVersion : null,
         activeLauncherPath: active?.status === "missing" ? null : (active?.launcherPath ?? null),
@@ -661,15 +585,15 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
     const managedRuntimeEnvironment = managedLauncherIsUsable
         ? activeManagedRuntime?.managedEnvironment ?? Object.freeze({})
         : Object.freeze({});
-    const bundledMcpVersion = installedPackageVersion(packageVersions, "@zokizuan/satori-mcp");
-    const bundledCoreVersion = installedPackageVersion(packageVersions, "@zokizuan/satori-core");
+    const releaseMcpVersion = installedPackageVersion(packageVersions, "@zokizuan/satori-mcp");
+    const releaseCoreVersion = installedPackageVersion(packageVersions, "@zokizuan/satori-core");
     if (
         managedRuntime?.mcpVersion
-        && bundledMcpVersion
-        && (managedRuntime.mcpVersion !== bundledMcpVersion || managedRuntime.coreVersion !== bundledCoreVersion)
+        && releaseMcpVersion
+        && (managedRuntime.mcpVersion !== releaseMcpVersion || managedRuntime.coreVersion !== releaseCoreVersion)
     ) {
         nextSteps.push(
-            "The CLI-bundled runtime differs from the active managed runtime.\nThe active launcher has not been changed.",
+            "The CLI release target differs from the active managed runtime.\nThe active launcher has not been changed.",
         );
     }
     const runtimeEnv: NodeJS.ProcessEnv = { ...env, ...managedRuntimeEnvironment };
@@ -702,9 +626,9 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
             const label = shortName === "cli"
                 ? "CLI package"
                 : shortName === "mcp"
-                    ? "CLI-bundled MCP package"
+                    ? "CLI release MCP target"
                     : shortName === "core"
-                        ? "CLI-bundled Core package"
+                        ? "CLI release Core target"
                         : null;
             addCheck(checks, checkName, "ok", label ? `${label}: ${pkg.name}@${pkg.version}` : `${pkg.name}@${pkg.version}`);
         } else {
@@ -752,8 +676,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
 
     try {
         const specifier = resolveManagedPackageSpecifier();
-        const pkg = readManagedPackageJson();
-        execImpl("npm", ["view", `${pkg.name}@${pkg.version}`, "version", "--json"], {
+        execImpl("npm", ["view", specifier, "version", "--json"], {
             encoding: "utf8",
             stdio: ["ignore", "pipe", "pipe"],
         });
@@ -805,11 +728,23 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
                 || "nomic-embed-text";
             try {
                 if ((context.environment.SATORI_RUNTIME_PROFILE?.trim() || "connected") === "offline") {
-                    assertNetworkPolicyAllowsEndpoint({ kind: "local-only" }, host, "OLLAMA_HOST");
+                    assertLocalOnlyEndpoint(host, "OLLAMA_HOST");
                 }
-                const identity: Readonly<ResolvedOllamaModelIdentity> = await (
-                    options.resolveOllamaIdentity ?? resolveOllamaModelIdentity
-                )({ model, host });
+                const resolveOllamaIdentity = options.resolveOllamaIdentity
+                    ?? (activeManagedRuntime?.status === "active"
+                        ? async (input: { model: string; host?: string }) => {
+                            const requireFromRuntime = createRequire(activeManagedRuntime.target);
+                            const coreEntry = requireFromRuntime.resolve("@zokizuan/satori-core");
+                            const core = await import(pathToFileURL(coreEntry).href) as {
+                                resolveOllamaModelIdentity: NonNullable<DoctorOptions["resolveOllamaIdentity"]>;
+                            };
+                            return core.resolveOllamaModelIdentity(input);
+                        }
+                        : undefined);
+                if (!resolveOllamaIdentity) {
+                    throw new Error("Ollama identity probe requires an active managed Satori runtime.");
+                }
+                const identity: Readonly<ResolvedOllamaModelIdentity> = await resolveOllamaIdentity({ model, host });
                 const recordedDigest = context.environment.OLLAMA_MODEL_DIGEST?.trim().replace(/^sha256:/i, "").toLowerCase();
                 if (recordedDigest && recordedDigest !== identity.artifactDigest) {
                     throw new Error("installed model digest does not match OLLAMA_MODEL_DIGEST");

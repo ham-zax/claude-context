@@ -1,5 +1,5 @@
 import path from "node:path";
-import { POTION_DIMENSION, POTION_MODEL_ID } from "@zokizuan/satori-core";
+import { POTION_DIMENSION, POTION_MODEL_ID } from "./local-runtime-contract.js";
 import { CliError } from "./errors.js";
 import { satoriCliCommand } from "./cli-command.js";
 import type {

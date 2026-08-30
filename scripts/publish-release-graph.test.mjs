@@ -77,7 +77,7 @@ function runnerOptions(extra = {}) {
   const skippedLatestCalls = [];
   let coreVisibleAfter = 0;
   let mcpDependencies = { '@zokizuan/satori-core': VERSIONS.core };
-  let cliDependencies = { '@zokizuan/satori-core': VERSIONS.core, '@zokizuan/satori-mcp': VERSIONS.mcp };
+  let cliManagedRuntime = { core: VERSIONS.core, mcp: VERSIONS.mcp };
   const gitStatusImpl = extra.gitStatusImpl || (() => '');
   const versionsCheckImpl = extra.versionsCheckImpl || (() => '');
   const buildImpl = extra.buildImpl || (() => '');
@@ -134,10 +134,11 @@ function runnerOptions(extra = {}) {
     });
     options.viewDependenciesImpl = extra.viewDependenciesImpl || ((packageName, version) => {
       viewCalls.push(`deps:${packageName}@${version}`);
-      if (packageName === '@zokizuan/satori-mcp') {
-        return mcpDependencies;
-      }
-      return cliDependencies;
+      return packageName === '@zokizuan/satori-mcp' ? mcpDependencies : {};
+    });
+    options.viewManagedRuntimeImpl = extra.viewManagedRuntimeImpl || ((packageName, version) => {
+      viewCalls.push(`runtime:${packageName}@${version}`);
+      return packageName === '@zokizuan/satori-cli' ? cliManagedRuntime : {};
     });
   }
   options.records = {
@@ -323,12 +324,12 @@ test('MCP dependency mismatch prevents CLI publish', async () => {
   assert.deepEqual(options.records.publishCalls, ['@zokizuan/satori-core', '@zokizuan/satori-mcp']);
 });
 
-test('CLI dependency verification succeeds', async () => {
+test('CLI managed-runtime verification succeeds', async () => {
   const options = runnerOptions();
   const result = await publishReleaseGraph(options);
   assert.deepEqual(result.published.map((entry) => entry.key), ['core', 'mcp', 'cli']);
-  const cliDepsCalls = options.records.viewCalls.filter((call) => call.includes('@zokizuan/satori-cli') && call.startsWith('deps:'));
-  assert.equal(cliDepsCalls.length, 1);
+  const cliRuntimeCalls = options.records.viewCalls.filter((call) => call.includes('@zokizuan/satori-cli') && call.startsWith('runtime:'));
+  assert.equal(cliRuntimeCalls.length, 1);
 });
 
 test('publish command failure reports uncertain registry state and prior verification', async () => {
@@ -381,7 +382,10 @@ test('default publish uses the exact verified tarballs in graph order', async ()
     calls.push({ command, args, callOptions });
     if (command === 'npm' && args[0] === 'view') {
       if (args.includes('dependencies')) {
-        return JSON.stringify({ '@zokizuan/satori-core': VERSIONS.core, '@zokizuan/satori-mcp': VERSIONS.mcp });
+        return JSON.stringify({ '@zokizuan/satori-core': VERSIONS.core });
+      }
+      if (args.includes('satoriManagedRuntime')) {
+        return JSON.stringify({ core: VERSIONS.core, mcp: VERSIONS.mcp });
       }
       return JSON.stringify(args[1].slice(args[1].lastIndexOf('@') + 1));
     }

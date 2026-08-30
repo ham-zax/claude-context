@@ -3,12 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createRequire } from "node:module";
 import {
     DoctorOptions,
     DoctorPackageVersion,
     type DoctorResult,
-    resolveCorePackageVersionViaMcp,
     resolveRuntimeVersionState,
     runDoctor,
 } from "./doctor.js";
@@ -667,8 +665,8 @@ test("runDoctor reports Satori package version set and independent-version polic
     );
     assert.match(result.packageVersionNote, /independent package versions/i);
     assert.equal(result.checks.find((check) => check.name === "package_version_cli")?.message, "CLI package: @zokizuan/satori-cli@0.4.15");
-    assert.equal(result.checks.find((check) => check.name === "package_version_mcp")?.message, "CLI-bundled MCP package: @zokizuan/satori-mcp@4.11.17");
-    assert.equal(result.checks.find((check) => check.name === "package_version_core")?.message, "CLI-bundled Core package: @zokizuan/satori-core@1.6.12");
+    assert.equal(result.checks.find((check) => check.name === "package_version_mcp")?.message, "CLI release MCP target: @zokizuan/satori-mcp@4.11.17");
+    assert.equal(result.checks.find((check) => check.name === "package_version_core")?.message, "CLI release Core target: @zokizuan/satori-core@1.6.12");
     assert.equal(result.checks.find((check) => check.name === "package_version_policy")?.status, "ok");
 });
 
@@ -1120,52 +1118,6 @@ test("runDoctor errors when a configured MCP client does not point to the manage
     assert.match(check?.message || "", /claude config/);
 });
 
-// Doctor finding: core nested under mcp must still resolve (createRequire from MCP package.json).
-test("resolveCorePackageVersionViaMcp resolves core nested under mcp package root", async () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-nested-"));
-    try {
-        const mcpDir = path.join(tempRoot, "node_modules", "@zokizuan", "satori-mcp");
-        const coreDir = path.join(mcpDir, "node_modules", "@zokizuan", "satori-core");
-        const mcpPackageJson = path.join(mcpDir, "package.json");
-        fs.mkdirSync(coreDir, { recursive: true });
-        fs.writeFileSync(
-            mcpPackageJson,
-            JSON.stringify({ name: "@zokizuan/satori-mcp", version: "9.9.9" }),
-            "utf8",
-        );
-        fs.writeFileSync(
-            path.join(coreDir, "package.json"),
-            JSON.stringify({ name: "@zokizuan/satori-core", version: "8.8.8" }),
-            "utf8",
-        );
-
-        // CLI-rooted require must not see nested core (repro of false warning layout).
-        const requireFromCliRoot = createRequire(path.join(tempRoot, "cli-entry.js"));
-        let cliSawCore = true;
-        try {
-            requireFromCliRoot.resolve("@zokizuan/satori-core/package.json");
-        } catch {
-            cliSawCore = false;
-        }
-        assert.equal(cliSawCore, false, "CLI root must not resolve nested core in this layout");
-
-        const viaMcp = resolveCorePackageVersionViaMcp({ mcpPackageJsonPath: mcpPackageJson });
-        assert.ok(viaMcp, "MCP-rooted core resolution should succeed for nested layout");
-        assert.equal(viaMcp?.name, "@zokizuan/satori-core");
-        assert.equal(viaMcp?.version, "8.8.8");
-        assert.match(viaMcp?.source || "", /satori-core[/\\]package\.json$/);
-    } finally {
-        fs.rmSync(tempRoot, { recursive: true, force: true });
-    }
-});
-
-test("resolveCorePackageVersionViaMcp resolves core in the live workspace", async () => {
-    const viaMcp = resolveCorePackageVersionViaMcp();
-    assert.ok(viaMcp, "MCP-rooted core resolution should succeed in this workspace");
-    assert.equal(viaMcp?.name, "@zokizuan/satori-core");
-    assert.ok(viaMcp?.version);
-});
-
 test("runtime version state consumes the already-resolved bundled package set", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-version-state-"));
     try {
@@ -1176,8 +1128,8 @@ test("runtime version state consumes the already-resolved bundled package set", 
         ];
         const state = resolveRuntimeVersionState(tempDir, packageVersions);
         assert.equal(state.cliVersion, "9.0.0");
-        assert.equal(state.bundledMcpVersion, "9.0.1");
-        assert.equal(state.bundledCoreVersion, "9.0.2");
+        assert.equal(state.releaseMcpVersion, "9.0.1");
+        assert.equal(state.releaseCoreVersion, "9.0.2");
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -1500,7 +1452,7 @@ test("doctor guidance neutrally identifies a bundle and active runtime mismatch"
         }));
         assert.equal(
             result.nextSteps.includes(
-                "The CLI-bundled runtime differs from the active managed runtime.\nThe active launcher has not been changed.",
+                "The CLI release target differs from the active managed runtime.\nThe active launcher has not been changed.",
             ),
             true,
         );

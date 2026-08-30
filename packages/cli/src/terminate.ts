@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { resolveSatoriStateRoot } from "@zokizuan/satori-core/integration";
+import { resolveSatoriStateRoot } from "./local-runtime-contract.js";
 import { CliError } from "./errors.js";
 import { discoverRuntimeOwnerRegistryPaths } from "./runtime-owner-path.js";
 

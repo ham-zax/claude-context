@@ -46,6 +46,14 @@ test('registry client normalizes npm 11 and npm 12 view output shapes', () => {
     );
   }
 
+  const runtime = { core: '3.6.1', mcp: '6.8.2' };
+  for (const runtimeOutput of [runtime, [runtime]]) {
+    const client = createReleaseRegistryClient({
+      execFileSyncImpl: () => JSON.stringify(runtimeOutput),
+    });
+    assert.deepEqual(client.viewManagedRuntime('@zokizuan/satori-cli', '1.9.3'), runtime);
+  }
+
   for (const versionsOutput of [
     ['3.6.0', '3.6.1'],
     [['3.6.0', '3.6.1']],
@@ -101,12 +109,11 @@ test('release verification checks exact versions, latest tags, and dependency cl
     },
     viewDependencies(packageName) {
       calls.push(`dependencies:${packageName}`);
-      return packageName.endsWith('-mcp')
-        ? { '@zokizuan/satori-core': LOCAL_VERSIONS.core }
-        : {
-            '@zokizuan/satori-core': LOCAL_VERSIONS.core,
-            '@zokizuan/satori-mcp': LOCAL_VERSIONS.mcp,
-          };
+      return { '@zokizuan/satori-core': LOCAL_VERSIONS.core };
+    },
+    viewManagedRuntime(packageName) {
+      calls.push(`runtime:${packageName}`);
+      return { core: LOCAL_VERSIONS.core, mcp: LOCAL_VERSIONS.mcp };
     },
   };
 
@@ -116,7 +123,8 @@ test('release verification checks exact versions, latest tags, and dependency cl
     assert.equal(calls.some((call) => call.endsWith(`@${version}`)), true);
   }
   assert.equal(calls.filter((call) => call.endsWith(`@${PRODUCTION_NPM_TAG}`)).length, 3);
-  assert.equal(calls.filter((call) => call.startsWith('dependencies:')).length, 2);
+  assert.equal(calls.filter((call) => call.startsWith('dependencies:')).length, 1);
+  assert.equal(calls.filter((call) => call.startsWith('runtime:')).length, 1);
 });
 
 test('release verification rejects a stale latest tag', async () => {
@@ -127,10 +135,11 @@ test('release verification rejects a stale latest tag', async () => {
       }
       return packageName.endsWith('-core') ? LOCAL_VERSIONS.core : packageName.endsWith('-mcp') ? LOCAL_VERSIONS.mcp : LOCAL_VERSIONS.cli;
     },
-    viewDependencies(packageName) {
-      return packageName.endsWith('-mcp')
-        ? { '@zokizuan/satori-core': LOCAL_VERSIONS.core }
-        : { '@zokizuan/satori-core': LOCAL_VERSIONS.core, '@zokizuan/satori-mcp': LOCAL_VERSIONS.mcp };
+    viewDependencies() {
+      return { '@zokizuan/satori-core': LOCAL_VERSIONS.core };
+    },
+    viewManagedRuntime() {
+      return { core: LOCAL_VERSIONS.core, mcp: LOCAL_VERSIONS.mcp };
     },
   };
 
@@ -166,10 +175,11 @@ test('final verification retries transient and propagating registry state', asyn
       }
       return LOCAL_VERSIONS[key];
     },
-    viewDependencies(packageName) {
-      return packageName.endsWith('-mcp')
-        ? { '@zokizuan/satori-core': LOCAL_VERSIONS.core }
-        : { '@zokizuan/satori-core': LOCAL_VERSIONS.core, '@zokizuan/satori-mcp': LOCAL_VERSIONS.mcp };
+    viewDependencies() {
+      return { '@zokizuan/satori-core': LOCAL_VERSIONS.core };
+    },
+    viewManagedRuntime() {
+      return { core: LOCAL_VERSIONS.core, mcp: LOCAL_VERSIONS.mcp };
     },
   };
 

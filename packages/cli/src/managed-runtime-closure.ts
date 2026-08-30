@@ -1,11 +1,8 @@
 import fs from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { CliError } from "./errors.js";
 import type { InstallVectorStore } from "./args.js";
-
-const EXACT_PACKAGE_VERSION_PATTERN =
-    /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+import { readManagedRuntimeRelease } from "./managed-package.js";
 
 const LANCEDB_NATIVE_PACKAGES = new Map<string, string>([
     ["darwin-arm64-", "@lancedb/lancedb-darwin-arm64"],
@@ -26,10 +23,6 @@ const OXC_PARSER_NATIVE_PACKAGES = new Map<string, string>([
     ["win32-arm64-", "@oxc-parser/binding-win32-arm64-msvc"],
     ["win32-ia32-", "@oxc-parser/binding-win32-ia32-msvc"],
     ["win32-x64-", "@oxc-parser/binding-win32-x64-msvc"],
-]);
-const LATEON_SHARP_NATIVE_PACKAGES = new Map<string, readonly [string, string]>([
-    ["linux-x64-gnu", ["@img/sharp-linux-x64", "@img/sharp-libvips-linux-x64"]],
-    ["linux-x64-musl", ["@img/sharp-linuxmusl-x64", "@img/sharp-libvips-linuxmusl-x64"]],
 ]);
 const MANAGED_RUNTIME_CLOSURE_FILE = ".satori-runtime-closure.json";
 
@@ -52,63 +45,12 @@ type ManagedRuntimeClosureIdentity = Readonly<{
     lateOnNativePackages: readonly string[];
 }>;
 
-function readManagedDependencyVersion(dependencyName: string, label: string): string {
-    try {
-        const requireFromCli = createRequire(import.meta.url);
-        const packageJsonPath = requireFromCli.resolve("@zokizuan/satori-core/package.json");
-        const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as {
-            dependencies?: Record<string, unknown>;
-        };
-        const version = packageJson.dependencies?.[dependencyName];
-        if (typeof version === "string" && EXACT_PACKAGE_VERSION_PATTERN.test(version)) {
-            return version;
-        }
-    } catch {
-        // Fall through to the release-closure error below.
-    }
-    throw new CliError(
-        "E_USAGE",
-        `The installed Satori CLI cannot resolve its exact ${label} runtime version.`,
-        2,
-    );
-}
-
 function readManagedLanceDbVersion(): string {
-    return readManagedDependencyVersion("@lancedb/lancedb", "LanceDB");
+    return readManagedRuntimeRelease().lanceDb;
 }
 
 function readManagedOxcParserVersion(): string {
-    return readManagedDependencyVersion("oxc-parser", "oxc-parser");
-}
-
-function readManagedSharpOptionalDependencies(): Readonly<Record<string, string>> {
-    try {
-        const requireFromCli = createRequire(import.meta.url);
-        const mcpPackageJsonPath = requireFromCli.resolve("@zokizuan/satori-mcp/package.json");
-        const requireFromMcp = createRequire(mcpPackageJsonPath);
-        const transformersEntry = requireFromMcp.resolve("@huggingface/transformers");
-        const sharpPackageJsonPath = createRequire(transformersEntry).resolve("sharp/package.json");
-        const packageJson = JSON.parse(fs.readFileSync(sharpPackageJsonPath, "utf8")) as {
-            optionalDependencies?: Record<string, unknown>;
-        };
-        const optionalDependencies = packageJson.optionalDependencies;
-        if (optionalDependencies && typeof optionalDependencies === "object") {
-            const exactDependencies: Record<string, string> = {};
-            for (const [name, version] of Object.entries(optionalDependencies)) {
-                if (typeof version === "string" && EXACT_PACKAGE_VERSION_PATTERN.test(version)) {
-                    exactDependencies[name] = version;
-                }
-            }
-            return exactDependencies;
-        }
-    } catch {
-        // Fall through to the release-closure error below.
-    }
-    throw new CliError(
-        "E_USAGE",
-        "The installed Satori CLI cannot resolve LateOn's exact Sharp native runtime versions.",
-        2,
-    );
+    return readManagedRuntimeRelease().oxcParser;
 }
 
 function detectLinuxLibc(): "gnu" | "musl" {
@@ -171,26 +113,15 @@ export function resolveLateOnNativePackages(
     const architecture = closure.architecture ?? process.arch;
     const libc = closure.libc ?? detectLinuxLibc();
     const platformKey = `${platform}-${architecture}-${platform === "linux" ? libc : ""}`;
-    const packageNames = LATEON_SHARP_NATIVE_PACKAGES.get(platformKey);
-    if (!packageNames) {
+    const packages = readManagedRuntimeRelease().lateOn.sharpNativePackages[platformKey];
+    if (!packages) {
         throw new CliError(
             "E_USAGE",
             `LateOn managed runtime is unsupported on ${platform}/${architecture}${platform === "linux" ? `/${libc}` : ""}.`,
             2,
         );
     }
-    const optionalDependencies = readManagedSharpOptionalDependencies();
-    return packageNames.map((packageName) => {
-        const version = optionalDependencies[packageName];
-        if (!version) {
-            throw new CliError(
-                "E_USAGE",
-                `LateOn's Sharp runtime does not declare ${packageName} as an exact optional dependency.`,
-                2,
-            );
-        }
-        return `${packageName}@${version}`;
-    });
+    return packages;
 }
 
 export function resolveManagedRuntimeClosureIdentity(

@@ -34,7 +34,6 @@ import {
     type InstallPostflightResult,
 } from "./install-postflight.js";
 import { verifyManagedPackageInstallability } from "./package-installability.js";
-import { resolveServerEntryPath } from "./resolve-server-entry.js";
 import { resolveInstalledPackageVersions, resolveRuntimeVersionState, runDoctor } from "./doctor.js";
 import type { DoctorPackageVersion, DoctorResult, RuntimeVersionState } from "./doctor.js";
 import { emitDoctorText } from "./doctor-format.js";
@@ -233,20 +232,20 @@ function installedPackageVersion(
 
 function buildVersionPayload(packages: DoctorPackageVersion[], state: RuntimeVersionState) {
     const cliVersion = state.cliVersion || readPackageVersion();
-    const bundledMcpVersion = installedPackageVersion(packages, "@zokizuan/satori-mcp")
-        ?? state.bundledMcpVersion;
-    const bundledCoreVersion = installedPackageVersion(packages, "@zokizuan/satori-core")
-        ?? state.bundledCoreVersion;
+    const releaseMcpVersion = installedPackageVersion(packages, "@zokizuan/satori-mcp")
+        ?? state.releaseMcpVersion;
+    const releaseCoreVersion = installedPackageVersion(packages, "@zokizuan/satori-core")
+        ?? state.releaseCoreVersion;
     const hasActiveMcp = state.activeManagedMcpVersion !== null;
     return {
         name: "@zokizuan/satori-cli",
         cli: "satori",
         version: cliVersion,
         cliVersion,
-        mcpVersion: hasActiveMcp ? state.activeManagedMcpVersion : bundledMcpVersion,
-        coreVersion: hasActiveMcp ? state.activeManagedCoreVersion : bundledCoreVersion,
-        bundledMcpVersion,
-        bundledCoreVersion,
+        mcpVersion: hasActiveMcp ? state.activeManagedMcpVersion : releaseMcpVersion,
+        coreVersion: hasActiveMcp ? state.activeManagedCoreVersion : releaseCoreVersion,
+        releaseMcpVersion,
+        releaseCoreVersion,
         activeManagedMcpVersion: state.activeManagedMcpVersion,
         activeManagedCoreVersion: state.activeManagedCoreVersion,
         activeLauncherPath: state.activeLauncherPath,
@@ -261,18 +260,18 @@ function formatVersionText(result: ReturnType<typeof buildVersionPayload>): stri
         `CLI: ${result.cliVersion}`,
     ];
     const hasActiveRuntime = result.activeManagedMcpVersion !== null;
-    const activeMatchesBundle = hasActiveRuntime
-        && result.activeManagedMcpVersion === result.bundledMcpVersion
+    const activeMatchesReleaseTarget = hasActiveRuntime
+        && result.activeManagedMcpVersion === result.releaseMcpVersion
         && result.activeManagedCoreVersion !== null
-        && result.activeManagedCoreVersion === result.bundledCoreVersion;
-    if (activeMatchesBundle) {
+        && result.activeManagedCoreVersion === result.releaseCoreVersion;
+    if (activeMatchesReleaseTarget) {
         lines.push(
             `Active managed runtime: MCP ${result.activeManagedMcpVersion}${result.activeManagedCoreVersion ? ` · Core ${result.activeManagedCoreVersion}` : ""}`,
             `Managed launcher: ${result.activeLauncherPath ?? "unknown"}`,
         );
     } else {
-        if (result.bundledMcpVersion !== null) {
-            lines.push(`Bundled release: MCP ${result.bundledMcpVersion}${result.bundledCoreVersion ? ` · Core ${result.bundledCoreVersion}` : ""}`);
+        if (result.releaseMcpVersion !== null) {
+            lines.push(`CLI release target: MCP ${result.releaseMcpVersion}${result.releaseCoreVersion ? ` · Core ${result.releaseCoreVersion}` : ""}`);
         }
         if (hasActiveRuntime) {
             lines.push(
@@ -285,19 +284,11 @@ function formatVersionText(result: ReturnType<typeof buildVersionPayload>): stri
             lines.push("Managed launcher: not installed");
         }
         if (hasActiveRuntime) {
-            lines.push("", "CLI-bundled release and active managed runtime differ.");
+            lines.push("", "CLI release target and active managed runtime differ.");
         }
     }
     lines.push("");
     return lines.join("\n");
-}
-
-function resolveDefaultServerArgs(): string[] {
-    const serverEntry = resolveServerEntryPath();
-    if (serverEntry.endsWith(".ts")) {
-        return ["--import", "tsx", serverEntry];
-    }
-    return [serverEntry];
 }
 
 function resolveDefaultServerInvocation(homeDir: string): { command: string; args: string[] } {
@@ -305,7 +296,11 @@ function resolveDefaultServerInvocation(homeDir: string): { command: string; arg
     if (fs.existsSync(managedLauncherPath)) {
         return { command: process.execPath, args: [managedLauncherPath] };
     }
-    return { command: process.execPath, args: resolveDefaultServerArgs() };
+    throw new CliError(
+        "E_USAGE",
+        `Satori managed runtime is not installed. Run ${satoriCliCommand("install")} first.`,
+        2,
+    );
 }
 
 function buildHelpPayload() {
@@ -715,10 +710,12 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
             return 0;
         }
 
-        const defaultServer = resolveDefaultServerInvocation(homeDir);
+        const defaultServer = options.serverCommand
+            ? { command: options.serverCommand, args: options.serverArgs ?? [] }
+            : resolveDefaultServerInvocation(homeDir);
         const session = await (options.connectSession || connectCliMcpSession)({
-            command: options.serverCommand || defaultServer.command,
-            args: options.serverArgs || (options.serverCommand ? resolveDefaultServerArgs() : defaultServer.args),
+            command: defaultServer.command,
+            args: options.serverArgs ?? defaultServer.args,
             env: {
                 ...effectiveEnv,
                 ...options.serverEnv,

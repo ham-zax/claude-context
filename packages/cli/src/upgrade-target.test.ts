@@ -9,9 +9,9 @@ function manifest(overrides: Record<string, unknown> = {}): string {
     return JSON.stringify({
         name: "@zokizuan/satori-cli",
         version: "1.4.0",
-        dependencies: {
-            "@zokizuan/satori-mcp": "6.3.0",
-            "@zokizuan/satori-core": "3.2.0",
+        satoriManagedRuntime: {
+            mcp: "6.3.0",
+            core: "3.2.0",
         },
         ...overrides,
     });
@@ -55,14 +55,14 @@ test("resolveSatoriUpgradeTarget rejects incomplete or non-exact release metadat
         manifest({ name: "@example/not-satori" }),
         manifest({ version: "next" }),
         manifest({
-            dependencies: {
-                "@zokizuan/satori-mcp": "^6.3.0",
-                "@zokizuan/satori-core": "3.2.0",
+            satoriManagedRuntime: {
+                mcp: "^6.3.0",
+                core: "3.2.0",
             },
         }),
         manifest({
-            dependencies: {
-                "@zokizuan/satori-mcp": "6.3.0",
+            satoriManagedRuntime: {
+                mcp: "6.3.0",
             },
         }),
     ]) {
@@ -70,7 +70,7 @@ test("resolveSatoriUpgradeTarget rejects incomplete or non-exact release metadat
             () => resolveSatoriUpgradeTarget({
                 execFileSyncImpl: (() => invalidManifest) as never,
             }),
-            /unexpected package identity|stable major\.minor\.patch/,
+            /unexpected package identity|stable major\.minor\.patch|satoriManagedRuntime/,
         );
     }
 });

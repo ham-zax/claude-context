@@ -133,6 +133,13 @@ export function createReleaseRegistryClient(options = {}) {
         `npm view dependencies for ${packageName}@${version}`,
       );
     },
+
+    viewManagedRuntime(packageName, version) {
+      return parseNpmViewDependenciesOutput(
+        runNpmView(['view', `${packageName}@${version}`, 'satoriManagedRuntime', '--json']),
+        `npm view satoriManagedRuntime for ${packageName}@${version}`,
+      );
+    },
   });
 }
 
@@ -188,12 +195,11 @@ export async function verifyReleaseRegistry(options = {}) {
             throw registryStateNotReady(`Published MCP must pin ${RELEASE_PACKAGES.core.name}@${localVersions.core}`);
           }
         } else if (key === 'cli') {
-          const dependencies = registry.viewDependencies(packageName, version);
-          for (const dependencyKey of ['core', 'mcp']) {
-            const dependencyName = RELEASE_PACKAGES[dependencyKey].name;
-            if (dependencies?.[dependencyName] !== localVersions[dependencyKey]) {
-              throw registryStateNotReady(`Published CLI must pin ${dependencyName}@${localVersions[dependencyKey]}`);
-            }
+          const runtime = registry.viewManagedRuntime(packageName, version);
+          if (runtime?.core !== localVersions.core || runtime?.mcp !== localVersions.mcp) {
+            throw registryStateNotReady(
+              `Published CLI satoriManagedRuntime must target Core ${localVersions.core} and MCP ${localVersions.mcp}`,
+            );
           }
         }
       }

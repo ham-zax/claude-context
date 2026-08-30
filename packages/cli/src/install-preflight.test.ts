@@ -12,6 +12,7 @@ import {
     planInstallRuntimeEnvironment,
     runInstallPreflight,
     verifyBundledPotionRuntime,
+    type PotionRuntimeCoreModule,
 } from "./install-preflight.js";
 import { CliError } from "./errors.js";
 import { buildLauncherScript, parseManagedLauncherEnvironment } from "./managed-launcher-script.mjs";
@@ -31,6 +32,9 @@ import { loadAcquisitionAuthority } from "./lateon-model-store.js";
 
 const DIGEST = "b".repeat(64);
 const POTION_ASSETS_ROOT = fileURLToPath(new URL("../../mcp/assets/potion/linux-x64/", import.meta.url));
+const loadWorkspaceCore = async (): Promise<PotionRuntimeCoreModule> => (
+    import("@zokizuan/satori-core") as Promise<PotionRuntimeCoreModule>
+);
 
 function installRuntimeWithProbeMarker(markerPath: string) {
     return ((_command: string, args: string[]) => {
@@ -710,6 +714,7 @@ test("offline install defaults to the integrity- and capability-verified bundled
             architecture: "x64",
         }, {
             probeLanceDb: async () => undefined,
+            verifyPotionRuntime: (assetsRoot) => verifyBundledPotionRuntime(assetsRoot, loadWorkspaceCore),
         });
 
         assert.deepEqual(result.runtimeEnvironment, {
@@ -723,7 +728,7 @@ test("offline install defaults to the integrity- and capability-verified bundled
             POTION_MODEL_PATH: path.join(POTION_ASSETS_ROOT, "model"),
             POTION_REQUEST_TIMEOUT_MS: "5000",
         });
-        await verifyBundledPotionRuntime(POTION_ASSETS_ROOT);
+        await verifyBundledPotionRuntime(POTION_ASSETS_ROOT, loadWorkspaceCore);
     } finally {
         fs.rmSync(homeDir, { recursive: true, force: true });
     }
@@ -746,6 +751,7 @@ test("offline install plan composes Potion embeddings with LateOn D32 reranking"
             architecture: "x64",
         }, {
             probeLanceDb: async () => undefined,
+            verifyPotionRuntime: (assetsRoot) => verifyBundledPotionRuntime(assetsRoot, loadWorkspaceCore),
         });
 
         assert.equal(result.runtimeEnvironment.EMBEDDING_PROVIDER, "Potion");
@@ -771,7 +777,7 @@ test("bundled Potion verification rejects a modified provenance manifest", async
         manifest.helper.rustToolchain = "untrusted-toolchain";
         fs.writeFileSync(path.join(assetsRoot, "manifest.json"), JSON.stringify(manifest), "utf8");
         await assert.rejects(
-            verifyBundledPotionRuntime(assetsRoot),
+            verifyBundledPotionRuntime(assetsRoot, loadWorkspaceCore),
             /missing, invalid, or untrusted/,
         );
     } finally {
@@ -789,7 +795,7 @@ test("bundled Potion verification rejects missing artifact when manifest is vali
         );
         // Do not create the files or create a truncated artifact
         await assert.rejects(
-            verifyBundledPotionRuntime(assetsRoot),
+            verifyBundledPotionRuntime(assetsRoot, loadWorkspaceCore),
             /missing|regular file|failed checksum/i,
         );
     } finally {
@@ -815,6 +821,7 @@ test("new offline install persists Potion embeddings and LateOn D32 in the manag
             fetchImpl: fixture.fetchImpl,
             preflightDependencies: {
                 probeLanceDb: async () => undefined,
+                verifyPotionRuntime: (assetsRoot) => verifyBundledPotionRuntime(assetsRoot, loadWorkspaceCore),
             },
         });
 
@@ -869,6 +876,7 @@ test("offline install persists an explicit reranker opt-out", async () => {
             runtimeCommand: { command: process.execPath, args: ["/tmp/satori-runtime.js"] },
             preflightDependencies: {
                 probeLanceDb: async () => undefined,
+                verifyPotionRuntime: (assetsRoot) => verifyBundledPotionRuntime(assetsRoot, loadWorkspaceCore),
             },
         });
 
@@ -1352,6 +1360,7 @@ test("managed D16 + CLI --reranker lateon migrates to D32", async () => {
             fetchImpl: fixture.fetchImpl,
             preflightDependencies: {
                 probeLanceDb: async () => undefined,
+                verifyPotionRuntime: (assetsRoot) => verifyBundledPotionRuntime(assetsRoot, loadWorkspaceCore),
             },
         });
 
@@ -1390,6 +1399,7 @@ test("managed D16 + CLI --reranker none disables LateOn", async () => {
             runtimeCommand: { command: process.execPath, args: ["/tmp/satori-runtime.js"] },
             preflightDependencies: {
                 probeLanceDb: async () => undefined,
+                verifyPotionRuntime: (assetsRoot) => verifyBundledPotionRuntime(assetsRoot, loadWorkspaceCore),
             },
         });
 
@@ -1640,6 +1650,7 @@ test("--reranker none performs zero LateOn fetch calls", async () => {
             }) as typeof fetch,
             preflightDependencies: {
                 probeLanceDb: async () => undefined,
+                verifyPotionRuntime: (assetsRoot) => verifyBundledPotionRuntime(assetsRoot, loadWorkspaceCore),
             },
         });
         assert.equal(fetchCalls, 0);

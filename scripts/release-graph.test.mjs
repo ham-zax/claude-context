@@ -30,16 +30,31 @@ function createWorkspace(files) {
 
 function standardWorkspace(overrides = {}) {
   return createWorkspace({
-    'packages/core/package.json': { name: '@zokizuan/satori-core', version: '3.6.0' },
+    'packages/core/package.json': {
+      name: '@zokizuan/satori-core',
+      version: '3.6.0',
+      dependencies: { '@lancedb/lancedb': '0.31.0', 'oxc-parser': '0.139.0' },
+    },
     'packages/mcp/package.json': {
       name: '@zokizuan/satori-mcp',
       version: '6.8.0',
-      dependencies: { '@zokizuan/satori-core': 'workspace:*' },
+      dependencies: {
+        '@zokizuan/satori-core': 'workspace:*',
+        '@huggingface/transformers': '3.0.2',
+        'onnxruntime-node': '1.19.2',
+      },
     },
     'packages/cli/package.json': {
       name: '@zokizuan/satori-cli',
       version: '1.9.0',
-      dependencies: { '@zokizuan/satori-core': 'workspace:*', '@zokizuan/satori-mcp': 'workspace:*' },
+      dependencies: {},
+      satoriManagedRuntime: {
+        mcp: '6.8.0',
+        core: '3.6.0',
+        lanceDb: '0.31.0',
+        oxcParser: '0.139.0',
+        lateOn: { transformers: '3.0.2', onnxruntimeNode: '1.19.2' },
+      },
     },
     'server.json': { version: '6.8.0' },
     ...overrides,
@@ -130,15 +145,22 @@ test('non-workspace MCP dependency on Core is rejected', () => {
   assert.throws(() => readLocalReleaseGraph(cwd), /must remain workspace:\*/);
 });
 
-test('non-workspace CLI dependency on MCP is rejected', () => {
+test('CLI bootstrap dependency on managed runtime is rejected', () => {
   const cwd = standardWorkspace({
     'packages/cli/package.json': {
       name: '@zokizuan/satori-cli',
       version: '1.9.0',
-      dependencies: { '@zokizuan/satori-core': 'workspace:*', '@zokizuan/satori-mcp': '6.8.0' },
+      dependencies: { '@zokizuan/satori-mcp': '6.8.0' },
+      satoriManagedRuntime: {
+        mcp: '6.8.0',
+        core: '3.6.0',
+        lanceDb: '0.31.0',
+        oxcParser: '0.139.0',
+        lateOn: { transformers: '3.0.2', onnxruntimeNode: '1.19.2' },
+      },
     },
   });
-  assert.throws(() => readLocalReleaseGraph(cwd), /must remain workspace:\*/);
+  assert.throws(() => readLocalReleaseGraph(cwd), /must not install managed runtime dependency/);
 });
 
 test('wrong package names and unstable versions are rejected', () => {
@@ -168,7 +190,8 @@ function packedManifests(overrides = {}) {
     cli: {
       name: '@zokizuan/satori-cli',
       version: '1.9.0',
-      dependencies: { '@zokizuan/satori-core': '3.6.0', '@zokizuan/satori-mcp': '6.8.0' },
+      dependencies: {},
+      satoriManagedRuntime: { core: '3.6.0', mcp: '6.8.0' },
     },
     ...overrides,
   };
@@ -180,9 +203,9 @@ test('exact packed dependency graph is accepted', () => {
     packedManifests: packedManifests(),
   });
   assert.deepEqual(result.edges, [
-    { from: 'mcp', to: 'core', version: '3.6.0' },
-    { from: 'cli', to: 'mcp', version: '6.8.0' },
-    { from: 'cli', to: 'core', version: '3.6.0' },
+    { from: 'mcp', to: 'core', kind: 'dependency', version: '3.6.0' },
+    { from: 'cli', to: 'mcp', kind: 'managed-runtime', version: '6.8.0' },
+    { from: 'cli', to: 'core', kind: 'managed-runtime', version: '3.6.0' },
   ]);
 });
 
@@ -208,7 +231,8 @@ test('packed CLI with stale MCP pin is rejected', () => {
           cli: {
             name: '@zokizuan/satori-cli',
             version: '1.9.0',
-            dependencies: { '@zokizuan/satori-core': '3.6.0', '@zokizuan/satori-mcp': '6.7.0' },
+            dependencies: {},
+            satoriManagedRuntime: { core: '3.6.0', mcp: '6.7.0' },
           },
         }),
       }),
@@ -225,7 +249,8 @@ test('packed CLI with stale Core pin is rejected', () => {
           cli: {
             name: '@zokizuan/satori-cli',
             version: '1.9.0',
-            dependencies: { '@zokizuan/satori-core': '3.5.0', '@zokizuan/satori-mcp': '6.8.0' },
+            dependencies: {},
+            satoriManagedRuntime: { core: '3.5.0', mcp: '6.8.0' },
           },
         }),
       }),
@@ -249,13 +274,18 @@ test('dependency ranges and workspace syntax in packed manifests are rejected', 
   }
 });
 
-test('missing packed dependency is rejected', () => {
+test('missing packed managed-runtime target is rejected', () => {
   assert.throws(
     () =>
       validatePackedDependencyGraph({
         localVersions: { core: '3.6.0', mcp: '6.8.0', cli: '1.9.0' },
         packedManifests: packedManifests({
-          cli: { name: '@zokizuan/satori-cli', version: '1.9.0', dependencies: { '@zokizuan/satori-core': '3.6.0' } },
+          cli: {
+            name: '@zokizuan/satori-cli',
+            version: '1.9.0',
+            dependencies: {},
+            satoriManagedRuntime: { core: '3.6.0' },
+          },
         }),
       }),
     /exact version 6\.8\.0.*received undefined/

@@ -113,7 +113,7 @@ candidate if any command or the subsequent packed graph verification dirties
 the working tree.
 
 After qualification, it packs Core, MCP and CLI into a temporary directory,
-verifies the packed dependency graph is exact, queries the production registry
+verifies the packed release graph is exact, queries the production registry
 for every published stable version, and compares normalized packed file trees
 when the exact local version is already published.
 
@@ -155,10 +155,10 @@ Package                         Local            Registry state   Action
 @zokizuan/satori-mcp            <mcp-version>    unpublished      publish
 @zokizuan/satori-cli            <cli-version>    unpublished      publish
 
-Packed dependency graph
-@zokizuan/satori-mcp -> @zokizuan/satori-core@<core-version>
-@zokizuan/satori-cli -> @zokizuan/satori-mcp@<mcp-version>
-@zokizuan/satori-cli -> @zokizuan/satori-core@<core-version>
+Packed release graph
+@zokizuan/satori-mcp dependency -> @zokizuan/satori-core@<core-version>
+@zokizuan/satori-cli managed runtime -> @zokizuan/satori-mcp@<mcp-version>
+@zokizuan/satori-cli managed runtime -> @zokizuan/satori-core@<core-version>
 
 Release graph valid.
 ```
@@ -172,11 +172,11 @@ closure:
 Core changes
     -> Core must receive an unpublished version
     -> MCP must receive an unpublished version because it pins Core
-    -> CLI must receive an unpublished version because it pins Core and MCP
+    -> CLI must receive an unpublished version because its managed-runtime target records Core and MCP
 
 MCP changes
     -> MCP must receive an unpublished version
-    -> CLI must receive an unpublished version because it pins MCP
+    -> CLI must receive an unpublished version because its managed-runtime target records MCP
 
 CLI-only changes
     -> only CLI must receive an unpublished version
@@ -201,7 +201,7 @@ requires a clean working tree, runs `versions:check`, regenerates `server.json`
 when MCP changes, and restores every file if generation or validation fails.
 
 From a fully published state, the planner advances the requested package and
-every reverse dependency that must carry a new exact pin. From a
+every reverse dependency whose exact dependency or managed-runtime target must change. From a
 prepared-but-unpublished state, a version already high enough for the requested
 intent remains unchanged and absorbs the coordinated changes. Always use the
 planner output rather than copying version numbers from this document.
@@ -213,7 +213,7 @@ The single supported publication path. It runs:
 1. the same complete qualification owned by `release:check`;
 2. publication of only the retained, already-verified tarballs in Core -> MCP
    -> CLI order;
-3. exact-version and dependency-pin verification after each package;
+3. exact-version verification plus dependency or managed-runtime target verification after each package;
 4. final verification that all exact versions and all three `latest` tags form
    the expected local Core -> MCP -> CLI closure.
 
@@ -231,7 +231,8 @@ stale or diverged history is rejected.
 
 After publishing Core, `release:all` polls until `@zokizuan/satori-core@<version>`
 is visible on npm, then publishes MCP, then verifies that the published MCP pins
-the exact Core version, then publishes CLI and verifies both pins. A publish
+the exact Core version, then publishes CLI and verifies its exact
+`satoriManagedRuntime` Core and MCP targets. A publish
 command is never retried automatically. If verification fails after a
 successful publish, the run stops and reports exactly which packages were
 already published.

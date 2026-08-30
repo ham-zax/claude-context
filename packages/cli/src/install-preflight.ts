@@ -1,18 +1,17 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
+import type {
+    ResolvedOllamaModelIdentity,
+    VectorDatabase,
+} from "@zokizuan/satori-core";
 import {
-    assertNetworkPolicyAllowsEndpoint,
+    assertLocalOnlyEndpoint,
     EMBEDDING_PROJECTION_VERSION,
     LEXICAL_PROJECTION_VERSION,
     POTION_DIMENSION,
     POTION_MODEL_ID,
-    PotionEmbedding,
-    resolveOllamaModelIdentity,
-    restoreVerifiedOwnerExecutableBit,
-    type ResolvedOllamaModelIdentity,
-    type VectorDatabase,
-} from "@zokizuan/satori-core";
+} from "./local-runtime-contract.js";
 import { connectCliMcpSession } from "./client.js";
 import { CliError } from "./errors.js";
 import {
@@ -52,9 +51,28 @@ export interface InstallPreflightResult {
 
 export interface InstallPreflightDependencies {
     probeLanceDb?: (databasePath: string) => Promise<void>;
-    resolveOllamaIdentity?: typeof resolveOllamaModelIdentity;
+    resolveOllamaIdentity?: (input: {
+        model: string;
+        host?: string;
+    }) => Promise<Readonly<ResolvedOllamaModelIdentity>>;
     verifyPotionRuntime?: (assetsRoot: string) => Promise<void>;
     probeCandidateRuntime?: (input: ManagedRuntimeCandidateProbeInput) => Promise<void>;
+}
+
+export interface PotionRuntimeCoreModule {
+    restoreVerifiedOwnerExecutableBit(input: {
+        filePath: string;
+        expectedSha256: string;
+        label: string;
+    }): Promise<void>;
+    PotionEmbedding: {
+        create(input: {
+            helperPath: string;
+            modelPath: string;
+            requestTimeoutMs: number;
+            startupTimeoutMs: number;
+        }): Promise<{ close(): Promise<void> }>;
+    };
 }
 
 export interface ManagedRuntimeCandidateProbeInput {
@@ -110,7 +128,10 @@ function sha256File(filePath: string): string {
     return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
 }
 
-export async function verifyBundledPotionRuntime(assetsRoot: string): Promise<void> {
+export async function verifyBundledPotionRuntime(
+    assetsRoot: string,
+    loadCore: () => Promise<PotionRuntimeCoreModule>,
+): Promise<void> {
     if (!path.isAbsolute(assetsRoot)) {
         throw new Error("Potion asset root must be absolute.");
     }
@@ -176,7 +197,8 @@ export async function verifyBundledPotionRuntime(assetsRoot: string): Promise<vo
     if (!helperArtifact) {
         throw new Error("Bundled Potion manifest does not declare the helper artifact.");
     }
-    await restoreVerifiedOwnerExecutableBit({
+    const core = await loadCore();
+    await core.restoreVerifiedOwnerExecutableBit({
         filePath: helperPath,
         expectedSha256: helperArtifact.sha256,
         label: "helper",
@@ -184,8 +206,7 @@ export async function verifyBundledPotionRuntime(assetsRoot: string): Promise<vo
 
     // Capability verification: structural presence is insufficient; prove the
     // worker starts, loads the model, completes a smoke embedding, and exits cleanly.
-    // PotionEmbedding.create() validates runtime execution and normalization.
-    const embedding = await PotionEmbedding.create({
+    const embedding = await core.PotionEmbedding.create({
         helperPath,
         modelPath,
         requestTimeoutMs: 5000,
@@ -566,7 +587,7 @@ export function planInstallRuntimeEnvironment(
         });
     }
     const host = input.env.OLLAMA_HOST?.trim() || DEFAULT_OLLAMA_HOST;
-    assertNetworkPolicyAllowsEndpoint({ kind: "local-only" }, host, "OLLAMA_HOST");
+    assertLocalOnlyEndpoint(host, "OLLAMA_HOST");
     return Object.freeze({
         SATORI_RUNTIME_PROFILE: "offline",
         VECTOR_STORE_PROVIDER: "LanceDB",
@@ -602,12 +623,18 @@ export async function runInstallPreflight(
         if (!input.potionAssetsRoot) {
             throw new Error("Potion offline install preflight requires the bundled runtime asset root.");
         }
-        await (dependencies.verifyPotionRuntime ?? verifyBundledPotionRuntime)(input.potionAssetsRoot);
+        if (!dependencies.verifyPotionRuntime) {
+            throw new Error("Potion preflight requires the staged Satori runtime verifier.");
+        }
+        await dependencies.verifyPotionRuntime(input.potionAssetsRoot);
         return { runtimeEnvironment: proposedEnvironment };
     }
     const host = input.env.OLLAMA_HOST?.trim() || DEFAULT_OLLAMA_HOST;
-    assertNetworkPolicyAllowsEndpoint({ kind: "local-only" }, host, "OLLAMA_HOST");
-    const identity = await (dependencies.resolveOllamaIdentity ?? resolveOllamaModelIdentity)({
+    assertLocalOnlyEndpoint(host, "OLLAMA_HOST");
+    if (!dependencies.resolveOllamaIdentity) {
+        throw new Error("Ollama preflight requires the staged Satori runtime resolver.");
+    }
+    const identity = await dependencies.resolveOllamaIdentity({
         model,
         host,
     });

@@ -10,7 +10,7 @@ type ExecFileSyncLike = typeof execFileSync;
 interface PublishedPackageManifest {
     name?: unknown;
     version?: unknown;
-    dependencies?: unknown;
+    satoriManagedRuntime?: unknown;
 }
 
 export interface SatoriUpgradeTarget {
@@ -80,19 +80,19 @@ function readManifest(raw: string): PublishedPackageManifest {
     return parsed as PublishedPackageManifest;
 }
 
-function exactDependency(
-    dependencies: Record<string, unknown>,
-    packageName: string,
+function exactRuntimeVersion(
+    runtime: Record<string, unknown>,
+    field: "mcp" | "core",
 ): string {
-    const version = dependencies[packageName];
+    const version = runtime[field];
     if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) {
         throw new CliError(
             "E_UPGRADE",
-            `${packageName} dependency must be an exact stable major.minor.patch version; received ${JSON.stringify(version)}.`,
+            `Latest Satori CLI managed-runtime ${field} version must be an exact stable major.minor.patch version; received ${JSON.stringify(version)}.`,
             1,
         );
     }
-    return version as string;
+    return version;
 }
 
 export function resolveSatoriUpgradeTarget(
@@ -130,13 +130,13 @@ export function resolveSatoriUpgradeTarget(
         );
     }
 
-    const dependencies = manifest.dependencies;
-    if (!dependencies || typeof dependencies !== "object" || Array.isArray(dependencies)) {
-        throw new CliError("E_UPGRADE", "Latest Satori CLI manifest has no usable runtime dependencies.", 1);
+    const runtime = manifest.satoriManagedRuntime;
+    if (!runtime || typeof runtime !== "object" || Array.isArray(runtime)) {
+        throw new CliError("E_UPGRADE", "Latest Satori CLI manifest has no usable satoriManagedRuntime contract.", 1);
     }
-    const dependencyMap = dependencies as Record<string, unknown>;
-    const mcpVersion = exactDependency(dependencyMap, MANAGED_PACKAGE_NAME);
-    const coreVersion = exactDependency(dependencyMap, CORE_PACKAGE_NAME);
+    const runtimeMap = runtime as Record<string, unknown>;
+    const mcpVersion = exactRuntimeVersion(runtimeMap, "mcp");
+    const coreVersion = exactRuntimeVersion(runtimeMap, "core");
 
     return {
         cliPackageSpecifier: `${CLI_PACKAGE_NAME}@${cliVersion}`,

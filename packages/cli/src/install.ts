@@ -57,7 +57,7 @@ import {
 } from "./install-planning.js";
 import {
     applyInstallPlan,
-    exactRuntimeLanceDbProbe,
+    exactRuntimePreflightDependencies,
     installManagedRuntimeCandidate,
     pruneManagedRuntimeAfterActivation,
     readContainingPackageIdentity,
@@ -80,6 +80,26 @@ import {
     resolveDefaultLateOnModelDirectory,
     type VerifiedLateOnModel,
 } from "./lateon-model-store.js";
+
+function managedRuntimePreflightDependencies(
+    homeDir: string,
+    runtimeCommand: NonNullable<InstallCommandOptions["runtimeCommand"]>,
+): Pick<InstallPreflightDependencies, "probeLanceDb" | "verifyPotionRuntime" | "resolveOllamaIdentity"> {
+    if (runtimeCommand.args.length !== 1 || !path.isAbsolute(runtimeCommand.args[0] ?? "")) {
+        return {};
+    }
+    const managedRuntimeRoot = path.join(homeDir, ".satori", "mcp-runtime");
+    const relative = path.relative(managedRuntimeRoot, runtimeCommand.args[0]!);
+    if (
+        relative === ""
+        || relative === ".."
+        || relative.startsWith(`..${path.sep}`)
+        || path.isAbsolute(relative)
+    ) {
+        return {};
+    }
+    return exactRuntimePreflightDependencies(runtimeCommand);
+}
 
 export async function executeInstallCommand(
     command: InstallCommandInput,
@@ -200,9 +220,8 @@ export async function executeInstallCommand(
                     );
                 }
                 const preflightDependencies: InstallPreflightDependencies = {
+                    ...managedRuntimePreflightDependencies(homeDir, installedRuntimeCommand),
                     ...options.preflightDependencies,
-                    probeLanceDb: options.preflightDependencies?.probeLanceDb
-                        ?? exactRuntimeLanceDbProbe(installedRuntimeCommand),
                 };
                 try {
                     preflight = await (options.preflightRunner ?? runInstallPreflight)(

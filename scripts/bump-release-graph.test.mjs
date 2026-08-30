@@ -23,16 +23,31 @@ function createWorkspace(files) {
 
 function standardWorkspace() {
   return createWorkspace({
-    'packages/core/package.json': { name: '@zokizuan/satori-core', version: '3.6.0' },
+    'packages/core/package.json': {
+      name: '@zokizuan/satori-core',
+      version: '3.6.0',
+      dependencies: { '@lancedb/lancedb': '0.31.0', 'oxc-parser': '0.139.0' },
+    },
     'packages/mcp/package.json': {
       name: '@zokizuan/satori-mcp',
       version: '6.8.0',
-      dependencies: { '@zokizuan/satori-core': 'workspace:*' },
+      dependencies: {
+        '@zokizuan/satori-core': 'workspace:*',
+        '@huggingface/transformers': '3.0.2',
+        'onnxruntime-node': '1.19.2',
+      },
     },
     'packages/cli/package.json': {
       name: '@zokizuan/satori-cli',
       version: '1.9.0',
-      dependencies: { '@zokizuan/satori-core': 'workspace:*', '@zokizuan/satori-mcp': 'workspace:*' },
+      dependencies: {},
+      satoriManagedRuntime: {
+        mcp: '6.8.0',
+        core: '3.6.0',
+        lanceDb: '0.31.0',
+        oxcParser: '0.139.0',
+        lateOn: { transformers: '3.0.2', onnxruntimeNode: '1.19.2' },
+      },
     },
     'server.json': { version: '6.8.0' },
   });
@@ -287,8 +302,10 @@ test('apply writes exact versions', async () => {
   assert.deepEqual(readJson(cwd, 'packages/core/package.json').version, '3.7.0');
   assert.deepEqual(readJson(cwd, 'packages/mcp/package.json').version, '6.8.1');
   assert.deepEqual(readJson(cwd, 'packages/cli/package.json').version, '1.9.1');
-  assert.deepEqual(readJson(cwd, 'packages/mcp/package.json').dependencies, { '@zokizuan/satori-core': 'workspace:*' });
-  assert.deepEqual(readJson(cwd, 'packages/cli/package.json').dependencies['@zokizuan/satori-mcp'], 'workspace:*');
+  assert.equal(readJson(cwd, 'packages/mcp/package.json').dependencies['@zokizuan/satori-core'], 'workspace:*');
+  assert.deepEqual(readJson(cwd, 'packages/cli/package.json').dependencies, {});
+  assert.deepEqual(readJson(cwd, 'packages/cli/package.json').satoriManagedRuntime.mcp, '6.8.1');
+  assert.deepEqual(readJson(cwd, 'packages/cli/package.json').satoriManagedRuntime.core, '3.7.0');
 });
 
 test('MCP bump regenerates server.json', async () => {

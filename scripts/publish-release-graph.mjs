@@ -257,6 +257,8 @@ export async function publishReleaseGraph(options = {}) {
     || ((packageName, version) => registryClient.viewVersion(packageName, version));
   const viewDependenciesImpl = options.viewDependenciesImpl
     || ((packageName, version) => registryClient.viewDependencies(packageName, version));
+  const viewManagedRuntimeImpl = options.viewManagedRuntimeImpl
+    || ((packageName, version) => registryClient.viewManagedRuntime(packageName, version));
   const sleepImpl = options.sleepImpl || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   const verifyReleaseImpl = options.verifyReleaseImpl
     || ((localVersions) => verifyReleaseRegistry({
@@ -339,6 +341,7 @@ export async function publishReleaseGraph(options = {}) {
         await verifyPublished(key, version, localVersions, {
           viewVersionImpl,
           viewDependenciesImpl,
+          viewManagedRuntimeImpl,
           sleepImpl,
           log,
         });
@@ -367,7 +370,7 @@ export async function publishReleaseGraph(options = {}) {
 }
 
 async function verifyPublished(key, version, localVersions, impls) {
-  const { viewVersionImpl, viewDependenciesImpl, sleepImpl, log } = impls;
+  const { viewVersionImpl, viewDependenciesImpl, viewManagedRuntimeImpl, sleepImpl, log } = impls;
   const packageName = RELEASE_PACKAGES[key].name;
   let lastDependencyMismatch = null;
   for (let attempt = 1; attempt <= REGISTRY_POLL_ATTEMPTS; attempt += 1) {
@@ -394,39 +397,54 @@ async function verifyPublished(key, version, localVersions, impls) {
       if (key === 'core') {
         return;
       }
-      let dependencies;
-      try {
-        dependencies = viewDependenciesImpl(packageName, version);
-      } catch (error) {
-        const classification = classifyRegistryError(error);
-        if (classification === 'auth') {
-          throw new Error(
-            `Registry authentication failed while verifying ${packageName}@${version} dependency metadata: ${errorMessage(error)}`
-          );
+      if (key === 'mcp') {
+        let dependencies;
+        try {
+          dependencies = viewDependenciesImpl(packageName, version);
+        } catch (error) {
+          const classification = classifyRegistryError(error);
+          if (classification === 'auth') {
+            throw new Error(
+              `Registry authentication failed while verifying ${packageName}@${version} dependency metadata: ${errorMessage(error)}`
+            );
+          }
+          if (classification === 'permanent') {
+            throw new Error(
+              `Registry dependency verification failed for ${packageName}@${version} after publish: ${errorMessage(error)}`
+            );
+          }
+          lastDependencyMismatch = `Published ${packageName}@${version} dependency metadata is not visible yet.`;
         }
-        if (classification === 'permanent') {
-          throw new Error(
-            `Registry dependency verification failed for ${packageName}@${version} after publish: ${errorMessage(error)}`
-          );
-        }
-        lastDependencyMismatch = `Published ${packageName}@${version} dependency metadata is not visible yet.`;
-      }
-      if (!dependencies || typeof dependencies !== 'object') {
-        lastDependencyMismatch = `Published ${packageName}@${version} dependency metadata is not visible yet.`;
-      } else if (key === 'mcp') {
-        if (dependencies['@zokizuan/satori-core'] === localVersions.core) {
+        if (dependencies?.['@zokizuan/satori-core'] === localVersions.core) {
           return;
         }
-        lastDependencyMismatch =
-          `Published ${packageName}@${version} dependency @zokizuan/satori-core is ${JSON.stringify(dependencies['@zokizuan/satori-core'])}, expected ${localVersions.core}`;
+        lastDependencyMismatch = dependencies && typeof dependencies === 'object'
+          ? `Published ${packageName}@${version} dependency @zokizuan/satori-core is ${JSON.stringify(dependencies['@zokizuan/satori-core'])}, expected ${localVersions.core}`
+          : `Published ${packageName}@${version} dependency metadata is not visible yet.`;
       } else {
-        const corePin = dependencies['@zokizuan/satori-core'];
-        const mcpPin = dependencies['@zokizuan/satori-mcp'];
-        if (corePin === localVersions.core && mcpPin === localVersions.mcp) {
+        let runtime;
+        try {
+          runtime = viewManagedRuntimeImpl(packageName, version);
+        } catch (error) {
+          const classification = classifyRegistryError(error);
+          if (classification === 'auth') {
+            throw new Error(
+              `Registry authentication failed while verifying ${packageName}@${version} satoriManagedRuntime metadata: ${errorMessage(error)}`
+            );
+          }
+          if (classification === 'permanent') {
+            throw new Error(
+              `Registry managed-runtime verification failed for ${packageName}@${version} after publish: ${errorMessage(error)}`
+            );
+          }
+          lastDependencyMismatch = `Published ${packageName}@${version} satoriManagedRuntime metadata is not visible yet.`;
+        }
+        if (runtime?.core === localVersions.core && runtime?.mcp === localVersions.mcp) {
           return;
         }
-        lastDependencyMismatch =
-          `Published ${packageName}@${version} dependency pins are @zokizuan/satori-core@${JSON.stringify(corePin)} and @zokizuan/satori-mcp@${JSON.stringify(mcpPin)}; expected ${localVersions.core} and ${localVersions.mcp}`;
+        lastDependencyMismatch = runtime && typeof runtime === 'object'
+          ? `Published ${packageName}@${version} satoriManagedRuntime targets Core ${JSON.stringify(runtime.core)} and MCP ${JSON.stringify(runtime.mcp)}; expected ${localVersions.core} and ${localVersions.mcp}`
+          : `Published ${packageName}@${version} satoriManagedRuntime metadata is not visible yet.`;
       }
     }
     if (attempt < REGISTRY_POLL_ATTEMPTS) {
