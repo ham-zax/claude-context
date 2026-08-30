@@ -1109,7 +1109,7 @@ test("runCli doctor reports stale MCP clients independently without changing JSO
             message: "codex config does not point exactly to the managed launcher. opencode config does not point exactly to the managed launcher.",
         }],
         nextSteps: [
-            "Rerun satori install for each stale configured MCP client, then restart it.",
+            "Rerun npx -y @zokizuan/satori-cli@latest install for each stale configured MCP client, then restart it.",
             "Restart your MCP client after changing Satori environment variables.",
         ],
         managedRuntime: null,
