@@ -228,6 +228,7 @@ export async function executeManagedRuntimeUpgrade(
     );
     const runtimeClosure: ManagedRuntimeClosure = {
         vectorStore: selection.vectorStore,
+        lateOn: selection.reranker === "lateon",
         platform: options.platform,
         architecture: options.architecture,
         libc: options.libc,

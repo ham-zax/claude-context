@@ -9,6 +9,7 @@ import { CliError } from "./errors.js";
 import {
     managedRuntimeClosureMatches,
     resolveLanceDbNativePackage,
+    resolveLateOnNativePackages,
     resolveOxcParserNativePackage,
     writeManagedRuntimeClosureManifest,
 } from "./managed-runtime-closure.js";
@@ -124,6 +125,29 @@ test("mapped Oxc native packages match the upstream optional dependency metadata
     }
 });
 
+test("resolves the exact host-native Sharp closure required by LateOn", () => {
+    assert.deepEqual(
+        resolveLateOnNativePackages({
+            vectorStore: "LanceDB",
+            lateOn: true,
+            platform: "linux",
+            architecture: "x64",
+            libc: "gnu",
+        }),
+        [
+            "@img/sharp-linux-x64@0.33.5",
+            "@img/sharp-libvips-linux-x64@1.0.4",
+        ],
+    );
+    assert.deepEqual(resolveLateOnNativePackages({
+        vectorStore: "LanceDB",
+        lateOn: false,
+        platform: "linux",
+        architecture: "x64",
+        libc: "gnu",
+    }), []);
+});
+
 test("rejects a platform without a published oxc-parser native binding", () => {
     assert.throws(
         () => resolveOxcParserNativePackage({
@@ -168,19 +192,24 @@ test("closure identity pins the oxc-parser native binding", () => {
     try {
         const closure = {
             vectorStore: "LanceDB" as const,
+            lateOn: true,
             platform: "linux" as const,
             architecture: "x64",
             libc: "gnu" as const,
         };
         writeManagedRuntimeClosureManifest(runtimeRoot, closure);
         const manifest = JSON.parse(fs.readFileSync(path.join(runtimeRoot, ".satori-runtime-closure.json"), "utf8"));
-        assert.equal(manifest.formatVersion, 2);
+        assert.equal(manifest.formatVersion, 3);
         assert.equal(manifest.oxcParserNativePackage, `@oxc-parser/binding-linux-x64-gnu@${oxcParserVersion}`);
+        assert.deepEqual(manifest.lateOnNativePackages, [
+            "@img/sharp-linux-x64@0.33.5",
+            "@img/sharp-libvips-linux-x64@1.0.4",
+        ]);
         assert.equal(managedRuntimeClosureMatches(runtimeRoot, closure), true);
 
         fs.writeFileSync(
             path.join(runtimeRoot, ".satori-runtime-closure.json"),
-            JSON.stringify({ ...manifest, formatVersion: 1 }),
+            JSON.stringify({ ...manifest, formatVersion: 2 }),
         );
         assert.equal(managedRuntimeClosureMatches(runtimeRoot, closure), false);
     } finally {

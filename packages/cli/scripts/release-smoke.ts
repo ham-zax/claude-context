@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
     resolveLanceDbNativePackage,
+    resolveLateOnNativePackages,
     resolveOxcParserNativePackage,
 } from "../src/managed-runtime-closure.js";
 import {
@@ -16,8 +17,9 @@ import {
 } from "../src/lateon-model-store.js";
 
 const STABLE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
-// Optional native packages remain omitted; the host-specific LanceDB and
-// oxc-parser bindings are installed explicitly and measured by the gate below.
+// Optional native packages remain omitted; required host-native LanceDB,
+// oxc-parser, and LateOn/Sharp packages are installed explicitly and measured
+// by the gate below.
 const MAX_LINUX_X64_MANAGED_RUNTIME_BYTES = 700 * 1024 * 1024;
 
 interface PackageManifest {
@@ -113,9 +115,12 @@ function installAndVerifyPackedReleaseClosure(
     const sourceCli = readManifest(path.join(sourceRoots.cli, "package.json"));
     const sourceMcp = readManifest(path.join(sourceRoots.mcp, "package.json"));
     const sourceCore = readManifest(path.join(sourceRoots.core, "package.json"));
-    const lanceDbNativePackage = resolveLanceDbNativePackage({
-        vectorStore: "LanceDB",
-    });
+    const runtimeClosure = {
+        vectorStore: "LanceDB" as const,
+        lateOn: process.platform === "linux" && process.arch === "x64",
+    };
+    const lanceDbNativePackage = resolveLanceDbNativePackage(runtimeClosure);
+    const lateOnNativePackages = resolveLateOnNativePackages(runtimeClosure);
     execFileSync("npm", [
         "install",
         "--prefix",
@@ -132,9 +137,8 @@ function installAndVerifyPackedReleaseClosure(
         tarballs.mcp,
         tarballs.cli,
         lanceDbNativePackage,
-        resolveOxcParserNativePackage({
-            vectorStore: "LanceDB",
-        }),
+        resolveOxcParserNativePackage(runtimeClosure),
+        ...lateOnNativePackages,
     ], {
         cwd: installRoot,
         encoding: "utf8",
@@ -306,6 +310,22 @@ function assertPackedLateOnAcquisitionAuthority(packedMcpRoot: string, packedCli
                 `Packed release closure must not ship ONNX weights: ${onnxArtifacts.join(", ")}.`,
             );
         }
+    }
+}
+
+function assertPackedLateOnNativeRuntime(packedMcpRoot: string): void {
+    if (process.platform !== "linux" || process.arch !== "x64") {
+        return;
+    }
+    const requireFromMcp = createRequire(path.join(packedMcpRoot, "package.json"));
+    const transformersEntry = requireFromMcp.resolve("@huggingface/transformers");
+    const requireFromTransformers = createRequire(transformersEntry);
+    try {
+        requireFromTransformers("sharp");
+    } catch (error) {
+        throw new Error(
+            `Packed LateOn runtime cannot load Sharp's Linux x64 native closure: ${error instanceof Error ? error.message : String(error)}`,
+        );
     }
 }
 
@@ -485,12 +505,13 @@ async function main(): Promise<void> {
         );
         assertManagedRuntimeSizeBudget(smokeExecDir);
         assertPackedLateOnAcquisitionAuthority(packed.packedMcpRoot, packed.packedCliRoot);
+        assertPackedLateOnNativeRuntime(packed.packedMcpRoot);
         assertPackedCliLateOnAcquisition(packed.packedCliRoot);
         assertPackedCliHelp(runCliSmoke(["--format", "json", "--help"], packed.cliEntry, smokeExecDir, baseEnv));
         await assertPackedPotionExecutionCapability(smokeExecDir, packed.packedMcpRoot);
         const doctorEnv = packedPotionSmokeEnv(baseEnv, packed.packedMcpRoot, smokeHomeDir);
         runCliSmoke(["doctor"], packed.cliEntry, smokeExecDir, doctorEnv);
-        console.log("[release:smoke] Packed CLI->MCP->Core closure, offline Potion runtime, and LateOn D32 acquisition authority passed.");
+        console.log("[release:smoke] Packed CLI->MCP->Core closure, offline Potion runtime, LateOn native runtime, and D32 acquisition authority passed.");
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const detail = error instanceof Error ? npmOutput(error) : "";

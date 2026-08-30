@@ -40,6 +40,7 @@ import {
 import {
     managedRuntimeClosureMatches,
     resolveLanceDbNativePackage,
+    resolveLateOnNativePackages,
     resolveOxcParserNativePackage,
     type ManagedRuntimeClosure,
     writeManagedRuntimeClosureManifest,
@@ -139,6 +140,7 @@ export function installManagedRuntimeCandidate(
             ? [resolveLanceDbNativePackage(closure)]
             : []),
         resolveOxcParserNativePackage(closure),
+        ...resolveLateOnNativePackages(closure),
     ];
     // Never reinstall into a directory that may still be the target of the
     // active launcher. A failed or stale reinstall must leave the old runtime
@@ -368,6 +370,7 @@ export function applyInstallPlan(
                             vectorStore: runtimeEnvironment.VECTOR_STORE_PROVIDER === "Milvus"
                                 ? "Milvus"
                                 : "LanceDB",
+                            lateOn: runtimeEnvironment.SATORI_RERANKER_PROVIDER === "lateon",
                             platform: options.platform,
                             architecture: options.architecture,
                             libc: options.libc,

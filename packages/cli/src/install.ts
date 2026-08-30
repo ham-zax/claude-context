@@ -171,6 +171,7 @@ export async function executeInstallCommand(
                         undefined,
                         {
                             vectorStore,
+                            lateOn: reranker === "lateon",
                             platform: options.platform,
                             architecture: options.architecture,
                             libc: options.libc,

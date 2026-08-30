@@ -27,23 +27,29 @@ const OXC_PARSER_NATIVE_PACKAGES = new Map<string, string>([
     ["win32-ia32-", "@oxc-parser/binding-win32-ia32-msvc"],
     ["win32-x64-", "@oxc-parser/binding-win32-x64-msvc"],
 ]);
+const LATEON_SHARP_NATIVE_PACKAGES = new Map<string, readonly [string, string]>([
+    ["linux-x64-gnu", ["@img/sharp-linux-x64", "@img/sharp-libvips-linux-x64"]],
+    ["linux-x64-musl", ["@img/sharp-linuxmusl-x64", "@img/sharp-libvips-linuxmusl-x64"]],
+]);
 const MANAGED_RUNTIME_CLOSURE_FILE = ".satori-runtime-closure.json";
 
 export interface ManagedRuntimeClosure {
     readonly vectorStore: InstallVectorStore;
+    readonly lateOn?: boolean;
     readonly platform?: NodeJS.Platform;
     readonly architecture?: string;
     readonly libc?: "gnu" | "musl";
 }
 
 type ManagedRuntimeClosureIdentity = Readonly<{
-    // Format 2 makes the required host Oxc binding explicit. Older v1
+    // Format 3 adds the host-native Sharp closure required by LateOn. Older
     // manifests intentionally fail closed and trigger a fresh generation.
-    formatVersion: 2;
+    formatVersion: 3;
     omitOptional: true;
     vectorStore: InstallVectorStore;
     lanceDbNativePackage: string | null;
     oxcParserNativePackage: string;
+    lateOnNativePackages: readonly string[];
 }>;
 
 function readManagedDependencyVersion(dependencyName: string, label: string): string {
@@ -73,6 +79,36 @@ function readManagedLanceDbVersion(): string {
 
 function readManagedOxcParserVersion(): string {
     return readManagedDependencyVersion("oxc-parser", "oxc-parser");
+}
+
+function readManagedSharpOptionalDependencies(): Readonly<Record<string, string>> {
+    try {
+        const requireFromCli = createRequire(import.meta.url);
+        const mcpPackageJsonPath = requireFromCli.resolve("@zokizuan/satori-mcp/package.json");
+        const requireFromMcp = createRequire(mcpPackageJsonPath);
+        const transformersEntry = requireFromMcp.resolve("@huggingface/transformers");
+        const sharpPackageJsonPath = createRequire(transformersEntry).resolve("sharp/package.json");
+        const packageJson = JSON.parse(fs.readFileSync(sharpPackageJsonPath, "utf8")) as {
+            optionalDependencies?: Record<string, unknown>;
+        };
+        const optionalDependencies = packageJson.optionalDependencies;
+        if (optionalDependencies && typeof optionalDependencies === "object") {
+            const exactDependencies: Record<string, string> = {};
+            for (const [name, version] of Object.entries(optionalDependencies)) {
+                if (typeof version === "string" && EXACT_PACKAGE_VERSION_PATTERN.test(version)) {
+                    exactDependencies[name] = version;
+                }
+            }
+            return exactDependencies;
+        }
+    } catch {
+        // Fall through to the release-closure error below.
+    }
+    throw new CliError(
+        "E_USAGE",
+        "The installed Satori CLI cannot resolve LateOn's exact Sharp native runtime versions.",
+        2,
+    );
 }
 
 function detectLinuxLibc(): "gnu" | "musl" {
@@ -125,17 +161,50 @@ export function resolveOxcParserNativePackage(
     return `${packageName}@${readManagedOxcParserVersion()}`;
 }
 
+export function resolveLateOnNativePackages(
+    closure: ManagedRuntimeClosure,
+): readonly string[] {
+    if (closure.lateOn !== true) {
+        return [];
+    }
+    const platform = closure.platform ?? process.platform;
+    const architecture = closure.architecture ?? process.arch;
+    const libc = closure.libc ?? detectLinuxLibc();
+    const platformKey = `${platform}-${architecture}-${platform === "linux" ? libc : ""}`;
+    const packageNames = LATEON_SHARP_NATIVE_PACKAGES.get(platformKey);
+    if (!packageNames) {
+        throw new CliError(
+            "E_USAGE",
+            `LateOn managed runtime is unsupported on ${platform}/${architecture}${platform === "linux" ? `/${libc}` : ""}.`,
+            2,
+        );
+    }
+    const optionalDependencies = readManagedSharpOptionalDependencies();
+    return packageNames.map((packageName) => {
+        const version = optionalDependencies[packageName];
+        if (!version) {
+            throw new CliError(
+                "E_USAGE",
+                `LateOn's Sharp runtime does not declare ${packageName} as an exact optional dependency.`,
+                2,
+            );
+        }
+        return `${packageName}@${version}`;
+    });
+}
+
 export function resolveManagedRuntimeClosureIdentity(
     closure: ManagedRuntimeClosure,
 ): ManagedRuntimeClosureIdentity {
     return {
-        formatVersion: 2,
+        formatVersion: 3,
         omitOptional: true,
         vectorStore: closure.vectorStore,
         lanceDbNativePackage: closure.vectorStore === "LanceDB"
             ? resolveLanceDbNativePackage(closure)
             : null,
         oxcParserNativePackage: resolveOxcParserNativePackage(closure),
+        lateOnNativePackages: resolveLateOnNativePackages(closure),
     };
 }
 
@@ -161,7 +230,10 @@ export function managedRuntimeClosureMatches(
             && (actual as Record<string, unknown>).lanceDbNativePackage
                 === expected.lanceDbNativePackage
             && (actual as Record<string, unknown>).oxcParserNativePackage
-                === expected.oxcParserNativePackage;
+                === expected.oxcParserNativePackage
+            && Array.isArray((actual as Record<string, unknown>).lateOnNativePackages)
+            && JSON.stringify((actual as Record<string, unknown>).lateOnNativePackages)
+                === JSON.stringify(expected.lateOnNativePackages);
     } catch {
         return false;
     }
