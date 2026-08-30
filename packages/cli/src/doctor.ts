@@ -27,6 +27,8 @@ import {
 import { readLocalDiagnosticsSummary, type LocalDiagnosticsSummary } from "./local-diagnostics.js";
 import { sanitizeTerminalText } from "./terminal-sanitize.js";
 
+export const SATORI_CLI_NPX_COMMAND = "npx -y @zokizuan/satori-cli@latest";
+
 type CheckStatus = "ok" | "warning" | "error";
 
 export interface DoctorCheck {
@@ -735,7 +737,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
                 "error",
                 `Active managed MCP ${activeManagedRuntime.mcpVersion} could not resolve @zokizuan/satori-core inside its managed generation.`,
             );
-            nextSteps.push("Rerun satori install so the managed runtime closure includes a matching @zokizuan/satori-core.");
+            nextSteps.push(`Rerun ${SATORI_CLI_NPX_COMMAND} install so the managed runtime closure includes a matching @zokizuan/satori-core.`);
         }
     }
 
@@ -889,7 +891,7 @@ function appendManagedClientChecks(
 ): void {
     if (proofs.length === 0) {
         addCheck(checks, "managed_client_configuration", "warning", "No supported MCP client has a Satori configuration entry.");
-        nextSteps.push("Run satori install for the intended MCP client.");
+        nextSteps.push(`Run ${SATORI_CLI_NPX_COMMAND} install.`);
         return;
     }
     const failures = proofs.filter((proof) => proof.status === "error");
@@ -916,7 +918,7 @@ function appendManagedClientChecks(
                     ? ` --runtime voyage --vector-store ${selectedVectorStore(failure.runtimeEnvironment || {}) === "Milvus" ? "milvus" : "lancedb"}`
                     : "";
             nextSteps.push(
-                `Run satori install --client ${failure.client}${runtimeArgs}, then restart ${clientLabel(failure.client)}.`,
+                `Run ${SATORI_CLI_NPX_COMMAND} install --client ${failure.client}${runtimeArgs}, then restart ${clientLabel(failure.client)}.`,
             );
         }
     }
@@ -1173,7 +1175,7 @@ function appendManagedLauncherCheck(
     const status = resolution?.status ?? "missing";
     if (status === "missing" || !resolution) {
         addCheck(checks, "managed_launcher", "warning", `Managed Satori launcher is missing at ${resolution?.launcherPath || ""}.`);
-        nextSteps.push("Run satori install for the intended MCP client to create the stable managed launcher.");
+        nextSteps.push(`Run ${SATORI_CLI_NPX_COMMAND} install to create the stable managed launcher.`);
         return;
     }
     if (status === "active") {
@@ -1187,12 +1189,12 @@ function appendManagedLauncherCheck(
     }
     if (status === "malformed") {
         addCheck(checks, "managed_launcher", "error", `Managed Satori launcher is malformed at ${resolution.launcherPath}.`);
-        nextSteps.push("Rerun satori install to replace the managed launcher with the current generated form.");
+        nextSteps.push(`Rerun ${SATORI_CLI_NPX_COMMAND} install to replace the managed launcher with the current generated form.`);
         return;
     }
     if (status === "missing_target") {
         addCheck(checks, "managed_launcher", "error", `Managed Satori launcher target does not exist: ${resolution.target}.`);
-        nextSteps.push("Rerun satori install to install the resident MCP runtime and refresh its launcher target.");
+        nextSteps.push(`Rerun ${SATORI_CLI_NPX_COMMAND} install to install the resident MCP runtime and refresh its launcher target.`);
         return;
     }
     if (status === "outside_store") {
@@ -1202,7 +1204,7 @@ function appendManagedLauncherCheck(
             "warning",
             `Managed Satori launcher target is outside the managed runtime store: ${resolution.target}.`,
         );
-        nextSteps.push("Inspect the custom launcher target, then rerun satori install to restore the managed runtime.");
+        nextSteps.push(`Inspect the custom launcher target, then rerun ${SATORI_CLI_NPX_COMMAND} install to restore the managed runtime.`);
         return;
     }
     // custom: the launcher does not use the installer-generated Node form.
@@ -1212,5 +1214,5 @@ function appendManagedLauncherCheck(
         "warning",
         `Managed Satori launcher does not use the expected Node launcher form: ${resolution.launcherPath}.`,
     );
-    nextSteps.push("Rerun satori install to replace the managed launcher with the current generated form.");
+    nextSteps.push(`Rerun ${SATORI_CLI_NPX_COMMAND} install to replace the managed launcher with the current generated form.`);
 }

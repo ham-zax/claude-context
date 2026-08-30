@@ -147,6 +147,12 @@ export function installManagedRuntimeCandidate(
         ? fs.mkdtempSync(`${stableRuntimeRoot}.generation-`)
         : stableRuntimeRoot;
     ensureDir(runtimeRoot);
+    const npmInstallEnv = { ...process.env };
+    for (const key of Object.keys(npmInstallEnv)) {
+        if (key.toLowerCase() === "npm_config_allow_scripts") {
+            delete npmInstallEnv[key];
+        }
+    }
     try {
         execImpl("npm", [
             "install",
@@ -163,6 +169,7 @@ export function installManagedRuntimeCandidate(
         ], {
             encoding: "utf8",
             stdio: ["ignore", "pipe", "pipe"],
+            env: npmInstallEnv,
         });
     } catch (error) {
         fs.rmSync(runtimeRoot, { recursive: true, force: true });

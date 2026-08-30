@@ -1,4 +1,4 @@
-import type { DoctorCheck, DoctorResult } from "./doctor.js";
+import { SATORI_CLI_NPX_COMMAND, type DoctorCheck, type DoctorResult } from "./doctor.js";
 import type { CliWriters } from "./format.js";
 import { sanitizeTerminalText } from "./terminal-sanitize.js";
 
@@ -207,12 +207,12 @@ function visibleNextSteps(result: DoctorResult, checks: DoctorCheck[], verbose: 
         || result.nextSteps.some((step) => /restart (Codex|OpenCode|Claude Code)/i.test(step));
     const steps = result.nextSteps.filter((step) => !(
         (specificRestartExists && step === "Restart your MCP client after changing Satori environment variables.")
-        || (staleClients.length > 0 && step === "Rerun satori install for each stale configured MCP client, then restart it.")
+        || (staleClients.length > 0 && step === `Rerun ${SATORI_CLI_NPX_COMMAND} install for each stale configured MCP client, then restart it.`)
     ));
     const rendered = steps.map((step) => {
         if (verbose) return step;
         if (step.startsWith("Retry the intended manage_index action;")) {
-            return "Inspect the abandoned operation with `satori doctor --verbose` before retrying indexing.";
+            return `Inspect the abandoned operation with \`${SATORI_CLI_NPX_COMMAND} doctor --verbose\` before retrying indexing.`;
         }
         return redactSensitiveDetails(step);
     });
@@ -220,7 +220,7 @@ function visibleNextSteps(result: DoctorResult, checks: DoctorCheck[], verbose: 
         if (rendered.some((step) => step.includes(`--client ${client.id}`))) {
             continue;
         }
-        rendered.push(`Run satori install --client ${client.id}, then restart ${client.name}.`);
+        rendered.push(`Run ${SATORI_CLI_NPX_COMMAND} install --client ${client.id}, then restart ${client.name}.`);
     }
     return [...new Set(rendered)];
 }
@@ -274,7 +274,7 @@ export function formatDoctorText(result: DoctorResult, options: DoctorTextOption
         }
         lines.push("", "Local diagnostics", "", JSON.stringify(result.localDiagnostics, null, 2));
     } else {
-        lines.push("", "Run `satori doctor --verbose` for paths and complete diagnostics.");
+        lines.push("", `Run \`${SATORI_CLI_NPX_COMMAND} doctor --verbose\` for paths and complete diagnostics.`);
     }
     lines.push("No automatic repair was performed.");
 
