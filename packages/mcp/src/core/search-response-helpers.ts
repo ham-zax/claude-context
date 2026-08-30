@@ -158,8 +158,8 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             code,
             severity: "degraded",
             blocksUse: false,
-            message: "Reranking failed, so results use retrieval ranking only.",
-            action: "Open the recommended result before trusting final ordering.",
+            message: "The reranker failed, so results use retrieval ranking only.",
+            action: "Retry once; if it recurs, use debugMode=ranking to inspect the reranker failure reason.",
         };
     }
     if (code === WARNING_CODES.RERANKER_INPUT_DEGRADED) {

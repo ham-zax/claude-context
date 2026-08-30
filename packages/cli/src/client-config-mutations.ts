@@ -13,6 +13,7 @@ import {
     LAUNCHER_OWNED_RUNTIME_ENV_VARS,
     MANAGED_BIN_DIR,
     MANAGED_LAUNCHER_FILE,
+    RETIRED_SATORI_RUNTIME_ENV_VARS,
     SATORI_RUNTIME_ENV_VARS,
 } from "./install-contracts.js";
 
@@ -621,7 +622,10 @@ export function parseJsoncObject(filePath: string, content: string): Record<stri
 
 export function buildOpenCodeServerConfig(runtimeCommand: ManagedRuntimeCommand, existing?: Record<string, unknown>): Record<string, unknown> {
     const environment = mergeRuntimeEnv(existing?.environment, runtimeEnvMap((name) => `{env:${name}}`));
-    for (const name of LAUNCHER_OWNED_RUNTIME_ENV_VARS) {
+    for (const name of [
+        ...LAUNCHER_OWNED_RUNTIME_ENV_VARS,
+        ...RETIRED_SATORI_RUNTIME_ENV_VARS,
+    ]) {
         delete environment[name];
     }
     return {

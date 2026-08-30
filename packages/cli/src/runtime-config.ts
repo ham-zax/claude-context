@@ -6,6 +6,7 @@ import {
     HISTORICAL_LATEON_D32_ACTIVATION_POLICY,
     LATEON_D32_ACTIVATION_POLICY,
     PREVIOUS_LATEON_CONTEXT_V3_ACTIVATION_POLICY,
+    PREVIOUS_LATEON_CONTEXT_V4_ACTIVATION_POLICY,
 } from "./lateon-model-store.js";
 
 export type RuntimeConfigCheckStatus = "ok" | "error";
@@ -201,11 +202,14 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
                 message: `Historical LateOn activation policy bound: ${activationPolicy}.`,
                 nextStep: `Run \`${satoriCliCommand("update")}\` to migrate to SATORI_LATEON_PROFILE=${DEFAULT_LATEON_PROFILE_ID} with SATORI_LATEON_ACTIVATION_POLICY=${LATEON_D32_ACTIVATION_POLICY}.`,
             });
-        } else if (activationPolicy === PREVIOUS_LATEON_CONTEXT_V3_ACTIVATION_POLICY) {
+        } else if (
+            activationPolicy === PREVIOUS_LATEON_CONTEXT_V3_ACTIVATION_POLICY
+            || activationPolicy === PREVIOUS_LATEON_CONTEXT_V4_ACTIVATION_POLICY
+        ) {
             checks.push({
                 name: "lateon_activation_policy",
                 status: "error",
-                message: `Previous context-v3 LateOn activation policy bound: ${activationPolicy}.`,
+                message: `Previous LateOn activation policy bound: ${activationPolicy}.`,
                 nextStep: `Run \`${satoriCliCommand("update")}\` to migrate to SATORI_LATEON_PROFILE=${DEFAULT_LATEON_PROFILE_ID} with SATORI_LATEON_ACTIVATION_POLICY=${LATEON_D32_ACTIVATION_POLICY}.`,
             });
         } else if (activationPolicy && activationPolicy !== LATEON_D32_ACTIVATION_POLICY) {
@@ -255,7 +259,8 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
     if (activationPolicy && rerankerProvider !== "lateon") {
         const knownPolicy = activationPolicy === LATEON_D32_ACTIVATION_POLICY
             || activationPolicy === HISTORICAL_LATEON_D32_ACTIVATION_POLICY
-            || activationPolicy === PREVIOUS_LATEON_CONTEXT_V3_ACTIVATION_POLICY;
+            || activationPolicy === PREVIOUS_LATEON_CONTEXT_V3_ACTIVATION_POLICY
+            || activationPolicy === PREVIOUS_LATEON_CONTEXT_V4_ACTIVATION_POLICY;
         checks.push({
             name: "lateon_activation_policy",
             status: "error",

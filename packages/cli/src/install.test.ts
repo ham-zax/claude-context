@@ -1397,22 +1397,22 @@ test("legacy no-provider upgrade defaults to LateOn D32", async () => {
         });
 
         assert.equal(observedReranker, "lateon");
-        assert.equal(observedProfile, "lateon_offline_quality_projection_v4_d32_v1");
-        assert.equal(observedPolicy, "lateon_context_v4_d32_owner_default_v1");
+        assert.equal(observedProfile, "lateon_offline_quality_projection_v5_d32_v1");
+        assert.equal(observedPolicy, "lateon_context_v5_d32_owner_default_v1");
         const launcherEnvironment = parseManagedLauncherDescriptor(readFile(launcherPath(homeDir))).managedEnv;
         assert.equal(launcherEnvironment.SATORI_RERANKER_PROVIDER, "lateon");
         assert.equal(
             launcherEnvironment.SATORI_LATEON_PROFILE,
-            "lateon_offline_quality_projection_v4_d32_v1",
+            "lateon_offline_quality_projection_v5_d32_v1",
         );
         assert.equal(
             launcherEnvironment.SATORI_LATEON_ACTIVATION_POLICY,
-            "lateon_context_v4_d32_owner_default_v1",
+            "lateon_context_v5_d32_owner_default_v1",
         );
     });
 });
 
-test("managed runtime upgrade migrates the previous managed context-v3 default combination atomically", async () => {
+test("managed runtime upgrade migrates the previous managed context-v4 default combination atomically", async () => {
     const previousManagedEnvironmentFor = (homeDir: string) => ({
         SATORI_RUNTIME_PROFILE: "offline",
         VECTOR_STORE_PROVIDER: "LanceDB",
@@ -1420,8 +1420,8 @@ test("managed runtime upgrade migrates the previous managed context-v3 default c
         EMBEDDING_PROVIDER: "Potion",
         SATORI_RERANKER_PROVIDER: "lateon",
         SATORI_LATEON_MODEL_PATH: path.join(homeDir, "lateon-model"),
-        SATORI_LATEON_PROFILE: "lateon_offline_quality_projection_v3_d32_v2",
-        SATORI_LATEON_ACTIVATION_POLICY: "lateon_context_v3_d32_owner_default_v1",
+        SATORI_LATEON_PROFILE: "lateon_offline_quality_projection_v4_d32_v1",
+        SATORI_LATEON_ACTIVATION_POLICY: "lateon_context_v4_d32_owner_default_v1",
     });
 
     await withTempHome(async (homeDir) => {
@@ -1463,16 +1463,16 @@ test("managed runtime upgrade migrates the previous managed context-v3 default c
             },
         });
 
-        assert.equal(observedProfile, "lateon_offline_quality_projection_v4_d32_v1");
-        assert.equal(observedPolicy, "lateon_context_v4_d32_owner_default_v1");
+        assert.equal(observedProfile, "lateon_offline_quality_projection_v5_d32_v1");
+        assert.equal(observedPolicy, "lateon_context_v5_d32_owner_default_v1");
         const launcherEnvironment = parseManagedLauncherDescriptor(readFile(launcherPath(homeDir))).managedEnv;
         assert.equal(
             launcherEnvironment.SATORI_LATEON_PROFILE,
-            "lateon_offline_quality_projection_v4_d32_v1",
+            "lateon_offline_quality_projection_v5_d32_v1",
         );
         assert.equal(
             launcherEnvironment.SATORI_LATEON_ACTIVATION_POLICY,
-            "lateon_context_v4_d32_owner_default_v1",
+            "lateon_context_v5_d32_owner_default_v1",
         );
     });
 
@@ -1563,16 +1563,16 @@ test("managed runtime upgrade migrates the historical context-v3 activation comb
             },
         });
 
-        assert.equal(observedProfile, "lateon_offline_quality_projection_v4_d32_v1");
-        assert.equal(observedPolicy, "lateon_context_v4_d32_owner_default_v1");
+        assert.equal(observedProfile, "lateon_offline_quality_projection_v5_d32_v1");
+        assert.equal(observedPolicy, "lateon_context_v5_d32_owner_default_v1");
         const launcherEnvironment = parseManagedLauncherDescriptor(readFile(launcherPath(homeDir))).managedEnv;
         assert.equal(
             launcherEnvironment.SATORI_LATEON_PROFILE,
-            "lateon_offline_quality_projection_v4_d32_v1",
+            "lateon_offline_quality_projection_v5_d32_v1",
         );
         assert.equal(
             launcherEnvironment.SATORI_LATEON_ACTIVATION_POLICY,
-            "lateon_context_v4_d32_owner_default_v1",
+            "lateon_context_v5_d32_owner_default_v1",
         );
     });
 
@@ -2945,7 +2945,7 @@ test("OpenCode install removes stale launcher-owned runtime identity while prese
         assert.equal(environment.SATORI_LATEON_PROFILE, undefined);
         assert.equal(environment.SATORI_LATEON_ACTIVATION_POLICY, undefined);
         assert.equal(environment.VOYAGEAI_API_KEY, "{env:VOYAGEAI_API_KEY}");
-        assert.equal(environment.SATORI_LATEON_REQUEST_DEADLINE_MS, "12345");
+        assert.equal(environment.SATORI_LATEON_REQUEST_DEADLINE_MS, undefined);
     });
 });
 

@@ -1,7 +1,7 @@
 {
-  "schemaVersion": "satori_lateon_runtime_profile_v4",
-  "profileId": "lateon_offline_quality_projection_v4_d32_v1",
-  "qualificationStatus": "owner_activated_operationally_qualified_not_held_out",
+  "schemaVersion": "satori_lateon_runtime_profile_v5",
+  "profileId": "lateon_offline_quality_projection_v5_d32_v1",
+  "qualificationStatus": "owner_activated_not_held_out",
   "identity": {
     "repository": "lightonai/LateOn-Code-edge",
     "revision": "07ef20f406c86badca122464808f4cac2f6e4b25",
@@ -86,7 +86,6 @@
     ],
     "candidateDepth": 32,
     "documentBatchSize": 1,
-    "profileIntraOpThreads": 8,
     "interOpThreads": 1
   },
   "execution": {
@@ -102,15 +101,5 @@
     "truncationSide": "right",
     "truncationStrategy": "longest_suffix_discarded",
     "warmupRequests": 2
-  },
-  "operationalBounds": {
-    "maximumActiveReranks": 1,
-    "maximumQueuedReranks": 1,
-    "maximumQueueWaitMilliseconds": 250,
-    "maximumReadinessMilliseconds": 2000,
-    "maximumScoreMilliseconds": 2000,
-    "maximumRerankerStageMilliseconds": 2500,
-    "maximumProcessPeakRssBytes": 1073741824,
-    "maximumProcessRetainedRssBytes": 671088640
   }
 }

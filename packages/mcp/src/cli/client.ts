@@ -57,7 +57,7 @@ export class CliMcpSession {
 
     async listTools(): Promise<ListToolsResult> {
         return createTimeout(
-            this.client.listTools(),
+            this.client.listTools(undefined, { timeout: this.callTimeoutMs }),
             this.callTimeoutMs,
             "E_CALL_TIMEOUT",
             `Timed out after ${this.callTimeoutMs}ms while calling tools/list.`
@@ -66,7 +66,11 @@ export class CliMcpSession {
 
     async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
         return createTimeout(
-            this.client.callTool({ name, arguments: args }),
+            this.client.callTool(
+                { name, arguments: args },
+                undefined,
+                { timeout: this.callTimeoutMs },
+            ),
             this.callTimeoutMs,
             "E_CALL_TIMEOUT",
             `Timed out after ${this.callTimeoutMs}ms while calling tools/call for '${name}'.`

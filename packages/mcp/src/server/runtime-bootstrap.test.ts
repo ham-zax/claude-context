@@ -243,7 +243,7 @@ test('Potion is selected only through explicit offline configuration', () => {
     }
 });
 
-test('offline config selects a shared LateOn model with operator overrides', () => {
+test('offline config selects the shared LateOn model without machine-speed overrides', () => {
     const keys = [
         'SATORI_RUNTIME_PROFILE',
         'VECTOR_STORE_PROVIDER',
@@ -253,8 +253,6 @@ test('offline config selects a shared LateOn model with operator overrides', () 
         'POTION_MODEL_PATH',
         'SATORI_RERANKER_PROVIDER',
         'SATORI_LATEON_MODEL_PATH',
-        'SATORI_LATEON_REQUEST_DEADLINE_MS',
-        'SATORI_LATEON_INTRA_OP_THREADS',
     ] as const;
     const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
     try {
@@ -268,17 +266,13 @@ test('offline config selects a shared LateOn model with operator overrides', () 
             POTION_MODEL_PATH: '/opt/satori/potion-model',
             SATORI_RERANKER_PROVIDER: 'lateon',
             SATORI_LATEON_MODEL_PATH: '/opt/satori/models/lateon-code-edge',
-            SATORI_LATEON_REQUEST_DEADLINE_MS: '3500',
-            SATORI_LATEON_INTRA_OP_THREADS: '2',
         });
 
         const parsed = createMcpConfig();
         assert.equal(parsed.rerankerProvider, 'lateon');
         assert.equal(parsed.lateOnModelPath, '/opt/satori/models/lateon-code-edge');
-        assert.equal(parsed.lateOnRequestDeadlineMs, 3500);
-        assert.equal(parsed.lateOnIntraOpThreads, 2);
-        assert.equal(parsed.lateOnProfileId, 'lateon_offline_quality_projection_v4_d32_v1');
-        assert.equal(parsed.lateOnActivationPolicy, 'lateon_context_v4_d32_owner_default_v1');
+        assert.equal(parsed.lateOnProfileId, 'lateon_offline_quality_projection_v5_d32_v1');
+        assert.equal(parsed.lateOnActivationPolicy, 'lateon_context_v5_d32_owner_default_v1');
     } finally {
         for (const key of keys) {
             const value = previous[key];
@@ -288,7 +282,7 @@ test('offline config selects a shared LateOn model with operator overrides', () 
     }
 });
 
-test('LateOn config selects explicit D16 or D32 profiles with bounded operational overrides', () => {
+test('LateOn config selects the current profile and rejects retired profiles and policies', () => {
     const keys = [
         'SATORI_RUNTIME_PROFILE',
         'VECTOR_STORE_PROVIDER',
@@ -300,12 +294,6 @@ test('LateOn config selects explicit D16 or D32 profiles with bounded operationa
         'SATORI_LATEON_MODEL_PATH',
         'SATORI_LATEON_PROFILE',
         'SATORI_LATEON_ACTIVATION_POLICY',
-        'SATORI_LATEON_REQUEST_DEADLINE_MS',
-        'SATORI_LATEON_MAX_QUEUE_WAIT_MS',
-        'SATORI_LATEON_RERANKER_STAGE_DEADLINE_MS',
-        'SATORI_LATEON_MAX_ACTIVE_RERANKS',
-        'SATORI_LATEON_MAX_QUEUED_RERANKS',
-        'SATORI_LATEON_INTRA_OP_THREADS',
     ] as const;
     const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
     try {
@@ -319,33 +307,21 @@ test('LateOn config selects explicit D16 or D32 profiles with bounded operationa
             POTION_MODEL_PATH: '/opt/satori/potion-model',
             SATORI_RERANKER_PROVIDER: 'lateon',
             SATORI_LATEON_MODEL_PATH: '/opt/satori/models/lateon-code-edge',
-            SATORI_LATEON_REQUEST_DEADLINE_MS: '1800',
-            SATORI_LATEON_MAX_QUEUE_WAIT_MS: '200',
-            SATORI_LATEON_RERANKER_STAGE_DEADLINE_MS: '2200',
-            SATORI_LATEON_MAX_ACTIVE_RERANKS: '1',
-            SATORI_LATEON_MAX_QUEUED_RERANKS: '0',
-            SATORI_LATEON_INTRA_OP_THREADS: '1',
         });
 
         delete process.env.SATORI_LATEON_PROFILE;
         const current = createMcpConfig();
         assert.equal(
             current.lateOnProfileId,
-            'lateon_offline_quality_projection_v4_d32_v1',
+            'lateon_offline_quality_projection_v5_d32_v1',
         );
-        assert.equal(current.lateOnActivationPolicy, 'lateon_context_v4_d32_owner_default_v1');
-        assert.equal(current.lateOnRequestDeadlineMs, 1800);
-        assert.equal(current.lateOnMaximumQueueWaitMs, 200);
-        assert.equal(current.lateOnRerankerStageDeadlineMs, 2200);
-        assert.equal(current.lateOnMaximumActiveReranks, 1);
-        assert.equal(current.lateOnMaximumQueuedReranks, 0);
-        assert.equal(current.lateOnIntraOpThreads, 1);
+        assert.equal(current.lateOnActivationPolicy, 'lateon_context_v5_d32_owner_default_v1');
 
-        process.env.SATORI_LATEON_PROFILE = 'lateon_offline_quality_projection_v4_d32_v1';
-        process.env.SATORI_LATEON_ACTIVATION_POLICY = 'lateon_context_v4_d32_owner_default_v1';
+        process.env.SATORI_LATEON_PROFILE = 'lateon_offline_quality_projection_v5_d32_v1';
+        process.env.SATORI_LATEON_ACTIVATION_POLICY = 'lateon_context_v5_d32_owner_default_v1';
         assert.equal(
             createMcpConfig().lateOnActivationPolicy,
-            'lateon_context_v4_d32_owner_default_v1',
+            'lateon_context_v5_d32_owner_default_v1',
         );
 
         // Phase 9.1 — retired profiles are recognized but never execute.
@@ -355,6 +331,7 @@ test('LateOn config selects explicit D16 or D32 profiles with bounded operationa
             'lateon_offline_quality_projection_v2_d32_v2',
             'lateon_offline_quality_projection_v3_d32_v1',
             'lateon_offline_quality_projection_v3_d32_v2',
+            'lateon_offline_quality_projection_v4_d32_v1',
         ]) {
             process.env.SATORI_LATEON_PROFILE = retiredProfile;
             process.env.SATORI_LATEON_ACTIVATION_POLICY = undefined;
@@ -362,22 +339,23 @@ test('LateOn config selects explicit D16 or D32 profiles with bounded operationa
             assert.throws(
                 createMcpConfig,
                 new RegExp(
-                    `Unsupported SATORI_LATEON_PROFILE '${retiredProfile}'[\\s\\S]*satori upgrade[\\s\\S]*lateon_offline_quality_projection_v4_d32_v1`,
+                    `Unsupported SATORI_LATEON_PROFILE '${retiredProfile}'[\\s\\S]*satori upgrade[\\s\\S]*lateon_offline_quality_projection_v5_d32_v1`,
                 ),
             );
         }
 
         // Retired activation policies are recognized but never execute.
-        process.env.SATORI_LATEON_PROFILE = 'lateon_offline_quality_projection_v4_d32_v1';
+        process.env.SATORI_LATEON_PROFILE = 'lateon_offline_quality_projection_v5_d32_v1';
         for (const retiredPolicy of [
             'lateon_d32_owner_default_v1',
             'lateon_context_v3_d32_owner_default_v1',
+            'lateon_context_v4_d32_owner_default_v1',
         ]) {
             process.env.SATORI_LATEON_ACTIVATION_POLICY = retiredPolicy;
             assert.throws(
                 createMcpConfig,
                 new RegExp(
-                    `Unsupported SATORI_LATEON_ACTIVATION_POLICY '${retiredPolicy}'[\\s\\S]*satori upgrade[\\s\\S]*lateon_context_v4_d32_owner_default_v1`,
+                    `Unsupported SATORI_LATEON_ACTIVATION_POLICY '${retiredPolicy}'[\\s\\S]*satori upgrade[\\s\\S]*lateon_context_v5_d32_owner_default_v1`,
                 ),
             );
         }
@@ -387,7 +365,7 @@ test('LateOn config selects explicit D16 or D32 profiles with bounded operationa
         delete process.env.SATORI_LATEON_ACTIVATION_POLICY;
 
         process.env.SATORI_RERANKER_PROVIDER = 'none';
-        process.env.SATORI_LATEON_ACTIVATION_POLICY = 'lateon_context_v4_d32_owner_default_v1';
+        process.env.SATORI_LATEON_ACTIVATION_POLICY = 'lateon_context_v5_d32_owner_default_v1';
         assert.throws(
             createMcpConfig,
             /SATORI_LATEON_ACTIVATION_POLICY requires SATORI_RERANKER_PROVIDER=lateon; received none/,
@@ -399,9 +377,6 @@ test('LateOn config selects explicit D16 or D32 profiles with bounded operationa
 
         process.env.SATORI_LATEON_PROFILE = 'lateon_projection_v2_d50_unknown';
         assert.throws(createMcpConfig, /Invalid SATORI_LATEON_PROFILE/);
-        process.env.SATORI_LATEON_PROFILE = 'lateon_offline_quality_projection_v4_d32_v1';
-        process.env.SATORI_LATEON_MAX_ACTIVE_RERANKS = '2';
-        assert.throws(createMcpConfig, /must be 0 or 1/);
     } finally {
         for (const key of keys) {
             const value = previous[key];

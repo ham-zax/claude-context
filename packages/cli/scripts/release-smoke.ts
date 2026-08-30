@@ -332,8 +332,8 @@ function assertPackedLateOnAcquisitionAuthority(packedMcpRoot: string, packedCli
         ? fs.readdirSync(assetsRoot).sort()
         : [];
     for (const requiredFile of [
-        "runtime-profile-v4-d32.json",
-        "runtime-profile-v4-d32.acquisition.json",
+        "runtime-profile-v5-d32.json",
+        "runtime-profile-v5-d32.acquisition.json",
     ]) {
         if (!shippedFiles.includes(requiredFile)) {
             throw new Error(
@@ -387,7 +387,7 @@ function assertPackedCliLateOnAcquisition(packedCliRoot: string): void {
         throw new Error("Packed CLI must ship the LateOn acquisition module.");
     }
     const storeSource = fs.readFileSync(storePath, "utf8");
-    const policyMissing = !storeSource.includes("lateon_context_v4_d32_owner_default_v1");
+    const policyMissing = !storeSource.includes("lateon_context_v5_d32_owner_default_v1");
     const frozenDigestMissing = !storeSource.includes("ecf84e7bd10ecdcb6b44ac9e0ad86f1a34986e5ee607eceec5b5724dcd29ecd8");
     const installSource = fs.readFileSync(installPath, "utf8");
     const resolutionMissing = !installSource.includes("resolveVerifiedLateOnModel");

@@ -176,7 +176,7 @@ test("Phase 9 architecture boundary: current versioned identities are accepted w
         const queryProjection = "search_rerank_query_v2";
         const sourceSelection = "bounded_source_selection_v2";
         const indexPolicy = "satori_index_policy_v5";
-        const lateonProfile = "satori_lateon_runtime_profile_v4";
+        const lateonProfile = "satori_lateon_runtime_profile_v5";
         const manifestKind = "relationship_manifest_v2";
         const markerKind = "satori_index_completion_v3";
         const canonicalJson = "lexicographic_recursive_canonical_json_v1";

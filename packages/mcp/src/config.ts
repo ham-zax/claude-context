@@ -162,12 +162,6 @@ export interface ContextMcpConfig {
     lateOnModelPath?: string;
     lateOnProfileId?: LateOnRuntimeProfileId;
     lateOnActivationPolicy?: LateOnActivationPolicyId;
-    lateOnRequestDeadlineMs?: number;
-    lateOnMaximumQueueWaitMs?: number;
-    lateOnRerankerStageDeadlineMs?: number;
-    lateOnMaximumActiveReranks?: 0 | 1;
-    lateOnMaximumQueuedReranks?: 0 | 1;
-    lateOnIntraOpThreads?: number;
     // read_file behavior
     readFileMaxLines?: number;
     readFileMaxBytes?: number;
@@ -550,9 +544,6 @@ export function createMcpConfig(): ContextMcpConfig {
         }
         return parsed;
     };
-    const lateOnRequestDeadlineMs = rerankerProvider === 'lateon'
-        ? parseOptionalPositiveInteger('SATORI_LATEON_REQUEST_DEADLINE_MS', 300_000)
-        : undefined;
     const lateOnProfileRaw = rerankerProvider === 'lateon'
         ? envManager.get('SATORI_LATEON_PROFILE')
         : undefined;
@@ -564,21 +555,18 @@ export function createMcpConfig(): ContextMcpConfig {
     }
     if (
         lateOnProfileRaw
-        && lateOnProfileRaw !== LATEON_RUNTIME_PROFILE_IDS.contextV4D32
+        && lateOnProfileRaw !== LATEON_RUNTIME_PROFILE_IDS.contextV5D32
     ) {
-        // Phase 9.1 — retired LateOn profiles are packaged runtime contracts,
-        // not executable profiles. Historical managed profile IDs remain
-        // recognized only at the CLI upgrade/migration boundary.
         throw new Error(
             `Unsupported SATORI_LATEON_PROFILE '${lateOnProfileRaw}'. `
             + 'This historical LateOn runtime profile is retired and cannot execute. '
-            + `Run \`satori upgrade\` to migrate to SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.contextV4D32} `
-            + `with SATORI_LATEON_ACTIVATION_POLICY=${LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV4}.`,
+            + `Run \`satori upgrade\` to migrate to SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.contextV5D32} `
+            + `with SATORI_LATEON_ACTIVATION_POLICY=${LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV5}.`,
         );
     }
     const lateOnProfileId = rerankerProvider === 'lateon'
         ? (lateOnProfileRaw as LateOnRuntimeProfileId | undefined)
-            ?? LATEON_RUNTIME_PROFILE_IDS.contextV4D32
+            ?? LATEON_RUNTIME_PROFILE_IDS.contextV5D32
         : undefined;
     const lateOnActivationPolicyRaw = envManager.get('SATORI_LATEON_ACTIVATION_POLICY');
     const knownLateOnActivationPolicies = Object.values(LATEON_ACTIVATION_POLICY_IDS);
@@ -602,45 +590,20 @@ export function createMcpConfig(): ContextMcpConfig {
     if (
         lateOnActivationPolicyRaw === LATEON_ACTIVATION_POLICY_IDS.ownerDefaultD32V2
         || lateOnActivationPolicyRaw === LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV3
+        || lateOnActivationPolicyRaw === LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV4
     ) {
         throw new Error(
             `Unsupported SATORI_LATEON_ACTIVATION_POLICY '${lateOnActivationPolicyRaw}'. `
             + 'This historical LateOn activation policy is retired. '
-            + `Run \`satori upgrade\` to migrate to SATORI_LATEON_ACTIVATION_POLICY=${LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV4} `
-            + `with SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.contextV4D32}.`,
+            + `Run \`satori upgrade\` to migrate to SATORI_LATEON_ACTIVATION_POLICY=${LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV5} `
+            + `with SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.contextV5D32}.`,
         );
     }
     const lateOnActivationPolicy = (
         rerankerProvider === 'lateon' && lateOnProfileRaw === undefined
-            ? lateOnActivationPolicyRaw ?? LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV4
+            ? lateOnActivationPolicyRaw ?? LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV5
             : lateOnActivationPolicyRaw
     ) as LateOnActivationPolicyId | undefined;
-    const lateOnMaximumQueueWaitMs = rerankerProvider === 'lateon'
-        ? parseOptionalPositiveInteger('SATORI_LATEON_MAX_QUEUE_WAIT_MS', 300_000)
-        : undefined;
-    const lateOnRerankerStageDeadlineMs = rerankerProvider === 'lateon'
-        ? parseOptionalPositiveInteger('SATORI_LATEON_RERANKER_STAGE_DEADLINE_MS', 300_000)
-        : undefined;
-    const parseOptionalCapacity = (variable: string): 0 | 1 | undefined => {
-        const raw = envManager.get(variable);
-        if (!raw) return undefined;
-        if (raw !== '0' && raw !== '1') {
-            throw new Error(`${variable} must be 0 or 1.`);
-        }
-        return Number(raw) as 0 | 1;
-    };
-    const lateOnMaximumActiveReranks = rerankerProvider === 'lateon'
-        ? parseOptionalCapacity('SATORI_LATEON_MAX_ACTIVE_RERANKS')
-        : undefined;
-    const lateOnMaximumQueuedReranks = rerankerProvider === 'lateon'
-        ? parseOptionalCapacity('SATORI_LATEON_MAX_QUEUED_RERANKS')
-        : undefined;
-    const lateOnIntraOpThreads = rerankerProvider === 'lateon'
-        ? parseOptionalPositiveInteger(
-            'SATORI_LATEON_INTRA_OP_THREADS',
-            os.availableParallelism(),
-        )
-        : undefined;
 
     // Parse Voyage reranker model from env var.
     const rankerModelEnv = envManager.get('VOYAGEAI_RERANKER_MODEL');
@@ -718,18 +681,6 @@ export function createMcpConfig(): ContextMcpConfig {
         ...(lateOnModelPath ? { lateOnModelPath } : {}),
         ...(lateOnProfileId ? { lateOnProfileId } : {}),
         ...(lateOnActivationPolicy ? { lateOnActivationPolicy } : {}),
-        ...(lateOnRequestDeadlineMs !== undefined ? { lateOnRequestDeadlineMs } : {}),
-        ...(lateOnMaximumQueueWaitMs !== undefined ? { lateOnMaximumQueueWaitMs } : {}),
-        ...(lateOnRerankerStageDeadlineMs !== undefined
-            ? { lateOnRerankerStageDeadlineMs }
-            : {}),
-        ...(lateOnMaximumActiveReranks !== undefined
-            ? { lateOnMaximumActiveReranks }
-            : {}),
-        ...(lateOnMaximumQueuedReranks !== undefined
-            ? { lateOnMaximumQueuedReranks }
-            : {}),
-        ...(lateOnIntraOpThreads !== undefined ? { lateOnIntraOpThreads } : {}),
         // read_file behavior
         readFileMaxLines,
         readFileMaxBytes,

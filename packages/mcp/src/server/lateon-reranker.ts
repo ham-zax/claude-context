@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { fork } from "node:child_process";
 import * as crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
@@ -13,7 +14,6 @@ import type {
 import { serializeCanonicalJson } from "../core/canonical-json.js";
 import { loadSearchRerankRequestContract } from "../core/search-rerank-request-contract.js";
 import type {
-    LateOnEffectiveOperationalBounds,
     LateOnRuntimeProfile,
     LateOnWorkerRequest,
     LateOnWorkerResponse,
@@ -29,8 +29,6 @@ export type { LateOnRuntimeProfileId } from "./lateon-reranker-protocol.js";
 
 export type LateOnOperationalReason =
     | "lateon_not_ready"
-    | "lateon_capacity_fallback"
-    | "lateon_queue_timeout"
     | "lateon_execution_timeout"
     | "lateon_cancelled"
     | "lateon_invalid_output"
@@ -49,8 +47,8 @@ export class LateOnOperationalError extends Error {
 }
 
 const PROFILE_PATHS: Readonly<Partial<Record<LateOnRuntimeProfileId, string>>> = Object.freeze({
-    [LATEON_RUNTIME_PROFILE_IDS.contextV4D32]: fileURLToPath(
-        new URL("../../assets/lateon/runtime-profile-v4-d32.json", import.meta.url),
+    [LATEON_RUNTIME_PROFILE_IDS.contextV5D32]: fileURLToPath(
+        new URL("../../assets/lateon/runtime-profile-v5-d32.json", import.meta.url),
     ),
 });
 
@@ -68,7 +66,6 @@ type QueuedRerank = {
     reject: (error: Error) => void;
     signal?: AbortSignal;
     abortListener?: () => void;
-    queueTimer?: NodeJS.Timeout;
     executionStartedAt?: number;
     onExecutionDiagnostics?: (diagnostics: RerankExecutionDiagnostics) => void;
 };
@@ -76,16 +73,12 @@ type QueuedRerank = {
 type WorkerState = "loading" | "ready" | "unhealthy" | "closed";
 
 const MAXIMUM_BOOTSTRAP_ATTEMPTS = 2;
+const LATEON_HARD_OPERATION_TIMEOUT_MS = 300_000;
+const LATEON_MAXIMUM_INTRA_OP_THREADS = 8;
 
 export type LateOnRerankerConfig = Readonly<{
     modelDirectory: string;
     profileId?: LateOnRuntimeProfileId;
-    requestDeadlineMilliseconds?: number;
-    maximumQueueWaitMilliseconds?: number;
-    rerankerStageDeadlineMilliseconds?: number;
-    maximumActiveReranks?: 0 | 1;
-    maximumQueuedReranks?: 0 | 1;
-    intraOpThreads?: number;
     workerPath?: string;
 }>;
 
@@ -100,21 +93,6 @@ function positiveSafeInteger(value: unknown, label: string): number {
     return safeIntegerAtLeast(value, 1, label);
 }
 
-function assertReducibleBound(
-    requested: number | undefined,
-    frozenMaximum: number,
-    label: string,
-    minimum: number = 1,
-): number {
-    const effective = requested === undefined
-        ? frozenMaximum
-        : safeIntegerAtLeast(requested, minimum, label);
-    if (effective > frozenMaximum) {
-        throw new Error(`${label} cannot exceed the qualified profile maximum of ${frozenMaximum}.`);
-    }
-    return effective;
-}
-
 function validateCommonProfile(profile: Partial<LateOnRuntimeProfile>): void {
     if (
         profile.identity?.license !== "Apache-2.0"
@@ -126,12 +104,11 @@ function validateCommonProfile(profile: Partial<LateOnRuntimeProfile>): void {
         throw new Error("LateOn runtime profile is malformed or unsupported.");
     }
     positiveSafeInteger(profile.inference.candidateDepth, "LateOn candidate depth");
-    positiveSafeInteger(profile.inference.profileIntraOpThreads, "LateOn intra-op thread count");
     positiveSafeInteger(profile.inference.interOpThreads, "LateOn inter-op thread count");
 }
 
 export function loadLateOnRuntimeProfile(
-    profileIdOrPath: LateOnRuntimeProfileId | string = LATEON_RUNTIME_PROFILE_IDS.contextV4D32,
+    profileIdOrPath: LateOnRuntimeProfileId | string = LATEON_RUNTIME_PROFILE_IDS.contextV5D32,
 ): LateOnRuntimeProfile {
     // Phase 9.1 — retired profiles are recognized only to produce a clear
     // rejection; they never load or execute.
@@ -140,36 +117,35 @@ export function loadLateOnRuntimeProfile(
     ) {
         throw new Error(
             `LateOn runtime profile '${profileIdOrPath}' is retired and unsupported. `
-            + `Run \`satori upgrade\` to migrate to ${LATEON_RUNTIME_PROFILE_IDS.contextV4D32}.`,
+            + `Run \`satori upgrade\` to migrate to ${LATEON_RUNTIME_PROFILE_IDS.contextV5D32}.`,
         );
     }
     const profilePath = PROFILE_PATHS[profileIdOrPath as LateOnRuntimeProfileId]
         ?? path.resolve(profileIdOrPath);
     const parsed = JSON.parse(fs.readFileSync(profilePath, "utf8")) as Partial<LateOnRuntimeProfile>;
     validateCommonProfile(parsed);
-    if (parsed.schemaVersion !== "satori_lateon_runtime_profile_v4") {
+    if (parsed.schemaVersion !== "satori_lateon_runtime_profile_v5") {
         throw new Error("LateOn runtime profile schema is retired or unsupported.");
     }
     if (
-        parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.contextV4D32
+        parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.contextV5D32
         || parsed.identity?.projectionVersion !== "search_rerank_document_v4"
         || !/^[a-f0-9]{64}$/.test(parsed.identity?.projectionSha256 ?? "")
         || parsed.identity?.queryProjectionVersion !== "search_rerank_query_v2"
         || parsed.identity?.requestContractSha256
             !== loadSearchRerankRequestContract().contractSha256
-        || parsed.qualificationStatus
-            !== "owner_activated_operationally_qualified_not_held_out"
+        || parsed.qualificationStatus !== "owner_activated_not_held_out"
     ) {
-        throw new Error("LateOn v4 runtime profile is malformed or unsupported.");
+        throw new Error("LateOn v5 runtime profile is malformed or unsupported.");
     }
-    validateBoundedExecutionContract(parsed);
+    validateExecutionContract(parsed);
     if (parsed.inference?.candidateDepth !== 32) {
         throw new Error(`LateOn ${parsed.profileId} must use candidate depth 32.`);
     }
     return parsed as LateOnRuntimeProfile;
 }
 
-function validateBoundedExecutionContract(
+function validateExecutionContract(
     parsed: Partial<LateOnRuntimeProfile>,
 ): void {
     if (
@@ -180,27 +156,9 @@ function validateBoundedExecutionContract(
         || parsed.execution.queryBatchSize !== 1
         || parsed.execution.documentEncoding !== "serial"
         || parsed.execution.tokenizerParallelism !== false
-        || parsed.operationalBounds?.maximumActiveReranks !== 1
-        || parsed.operationalBounds.maximumQueuedReranks !== 1
     ) {
-        throw new Error("LateOn bounded execution contract is malformed or unsupported.");
+        throw new Error("LateOn execution contract is malformed or unsupported.");
     }
-    positiveSafeInteger(
-        parsed.operationalBounds.maximumQueueWaitMilliseconds,
-        "LateOn maximum queue wait",
-    );
-    positiveSafeInteger(
-        parsed.operationalBounds.maximumReadinessMilliseconds,
-        "LateOn readiness deadline",
-    );
-    positiveSafeInteger(
-        parsed.operationalBounds.maximumScoreMilliseconds,
-        "LateOn scoring deadline",
-    );
-    positiveSafeInteger(
-        parsed.operationalBounds.maximumRerankerStageMilliseconds,
-        "LateOn reranker-stage deadline",
-    );
 }
 
 function profileDigest(profile: LateOnRuntimeProfile): string {
@@ -226,8 +184,6 @@ export class LateOnReranker implements Reranker {
     private readonly rawProfileDigest: string;
     private readonly identity: ReturnType<Reranker["getIdentity"]>;
     private readonly modelDirectory: string;
-    private readonly effectiveBounds: LateOnEffectiveOperationalBounds;
-    private readonly readinessDeadlineMilliseconds: number;
     private readonly intraOpThreads: number;
     private readonly workerPath: string;
     private worker: ChildProcess | null = null;
@@ -241,7 +197,7 @@ export class LateOnReranker implements Reranker {
     private active = false;
     private activeRequest: QueuedRerank | null = null;
     private activeTask: Promise<void> | null = null;
-    private queued: QueuedRerank | null = null;
+    private readonly queue: QueuedRerank[] = [];
     private termination: Promise<void> | null = null;
     private closed = false;
     private hasReachedReady = false;
@@ -252,25 +208,15 @@ export class LateOnReranker implements Reranker {
 
     constructor(config: LateOnRerankerConfig) {
         this.profile = loadLateOnRuntimeProfile(
-            config.profileId ?? LATEON_RUNTIME_PROFILE_IDS.contextV4D32,
+            config.profileId ?? LATEON_RUNTIME_PROFILE_IDS.contextV5D32,
         );
         this.rawProfileDigest = profileDigest(this.profile);
         this.modelDirectory = path.resolve(config.modelDirectory);
-        this.intraOpThreads = this.resolveIntraOpThreads(config.intraOpThreads);
-        this.effectiveBounds = this.resolveOperationalBounds(config);
-        this.readinessDeadlineMilliseconds =
-            this.profile.operationalBounds.maximumReadinessMilliseconds;
-        const effectiveProfileDigest = crypto.createHash("sha256")
-            .update(serializeCanonicalJson({
-                profile: this.profile,
-                effectiveOperationalBounds: this.effectiveBounds,
-                intraOpThreads: this.intraOpThreads,
-            }), "utf8")
-            .digest("hex");
+        this.intraOpThreads = this.resolveIntraOpThreads();
         this.identity = Object.freeze({
             provider: "lateon",
             model: `${this.profile.identity.repository}@${this.profile.identity.revision}`,
-            profile: effectiveProfileDigest,
+            profile: this.rawProfileDigest,
         });
         this.workerPath = config.workerPath
             ? path.resolve(config.workerPath)
@@ -334,7 +280,7 @@ export class LateOnReranker implements Reranker {
             workerAttached: this.worker !== null,
             activeRequest: this.activeRequest !== null,
             activeTask: this.activeTask !== null,
-            queuedRequest: this.queued !== null,
+            queuedRequest: this.queue.length > 0,
             pendingWorkerRequests: this.pending.size,
             readinessTimerActive: this.readinessTimer !== undefined,
             terminationActive: this.termination !== null,
@@ -378,16 +324,10 @@ export class LateOnReranker implements Reranker {
             if (this.terminalBootstrapFailure) {
                 throw this.terminalBootstrapFailure;
             }
-            throw operationalError(
-                "lateon_not_ready",
-                `LateOn profile ${this.getProfileId()} is not ready.`,
-            );
-        }
-        if (this.effectiveBounds.maximumActiveReranks === 0) {
-            throw operationalError(
-                "lateon_capacity_fallback",
-                "LateOn active capacity is disabled by the effective profile.",
-            );
+            await this.waitUntilReady();
+            if (signal?.aborted) {
+                throw operationalError("lateon_cancelled", "LateOn rerank was cancelled.");
+            }
         }
 
         const offeredAt = Date.now();
@@ -414,23 +354,7 @@ export class LateOnReranker implements Reranker {
                 this.startExecution(request);
                 return;
             }
-            if (this.effectiveBounds.maximumQueuedReranks === 0 || this.queued) {
-                reject(operationalError(
-                    "lateon_capacity_fallback",
-                    "LateOn rerank capacity is full; deterministic fallback is required.",
-                ));
-                return;
-            }
-            request.queueTimer = setTimeout(() => {
-                if (this.queued !== request) return;
-                this.queued = null;
-                reject(operationalError(
-                    "lateon_queue_timeout",
-                    `LateOn queue wait exceeded ${this.effectiveBounds.maximumQueueWaitMilliseconds} ms.`,
-                ));
-            }, this.effectiveBounds.maximumQueueWaitMilliseconds);
-            request.queueTimer.unref();
-            this.queued = request;
+            this.queue.push(request);
         });
         return result.finally(() => {
             if (signal && submittedRequest.abortListener) {
@@ -439,45 +363,11 @@ export class LateOnReranker implements Reranker {
         });
     }
 
-    private resolveIntraOpThreads(requested: number | undefined): number {
-        const frozen = this.profile.inference.profileIntraOpThreads;
-        if (requested !== undefined && requested !== frozen) {
-            throw new Error(`LateOn bounded thread policy is immutable at ${frozen} intra-op threads.`);
-        }
-        return frozen;
-    }
-
-    private resolveOperationalBounds(config: LateOnRerankerConfig): LateOnEffectiveOperationalBounds {
-        const frozen = this.profile.operationalBounds;
-        return Object.freeze({
-            maximumActiveReranks: assertReducibleBound(
-                config.maximumActiveReranks,
-                frozen.maximumActiveReranks,
-                "LateOn maximum active reranks",
-                0,
-            ) as 0 | 1,
-            maximumQueuedReranks: assertReducibleBound(
-                config.maximumQueuedReranks,
-                frozen.maximumQueuedReranks,
-                "LateOn maximum queued reranks",
-                0,
-            ) as 0 | 1,
-            maximumQueueWaitMilliseconds: assertReducibleBound(
-                config.maximumQueueWaitMilliseconds,
-                frozen.maximumQueueWaitMilliseconds,
-                "LateOn maximum queue wait",
-            ),
-            maximumScoreMilliseconds: assertReducibleBound(
-                config.requestDeadlineMilliseconds,
-                frozen.maximumScoreMilliseconds,
-                "LateOn scoring deadline",
-            ),
-            maximumRerankerStageMilliseconds: assertReducibleBound(
-                config.rerankerStageDeadlineMilliseconds,
-                frozen.maximumRerankerStageMilliseconds,
-                "LateOn reranker-stage deadline",
-            ),
-        });
+    private resolveIntraOpThreads(): number {
+        return Math.max(
+            1,
+            Math.min(os.availableParallelism(), LATEON_MAXIMUM_INTRA_OP_THREADS),
+        );
     }
 
     private createReadinessPromise(): Promise<void> {
@@ -527,9 +417,9 @@ export class LateOnReranker implements Reranker {
         this.readinessTimer = setTimeout(() => {
             fail(operationalError(
                 "lateon_not_ready",
-                `LateOn worker readiness exceeded ${this.readinessDeadlineMilliseconds} ms.`,
+                `LateOn worker readiness exceeded ${LATEON_HARD_OPERATION_TIMEOUT_MS} ms.`,
             ));
-        }, this.readinessDeadlineMilliseconds);
+        }, LATEON_HARD_OPERATION_TIMEOUT_MS);
         this.readinessTimer.unref();
         worker.send({
             type: "initialize",
@@ -616,7 +506,6 @@ export class LateOnReranker implements Reranker {
     }
 
     private startExecution(request: QueuedRerank): void {
-        if (request.queueTimer) clearTimeout(request.queueTimer);
         request.executionStartedAt = Date.now();
         this.active = true;
         this.activeRequest = request;
@@ -642,9 +531,9 @@ export class LateOnReranker implements Reranker {
             "lateon_cancelled",
             "LateOn rerank was cancelled.",
         );
-        if (this.queued === request) {
-            this.queued = null;
-            if (request.queueTimer) clearTimeout(request.queueTimer);
+        const queuedIndex = this.queue.indexOf(request);
+        if (queuedIndex >= 0) {
+            this.queue.splice(queuedIndex, 1);
             request.reject(cancellation);
             return;
         }
@@ -654,20 +543,27 @@ export class LateOnReranker implements Reranker {
     }
 
     private startQueuedIfPossible(): void {
-        const queued = this.queued;
-        if (!queued) return;
-        this.queued = null;
+        if (this.active || this.queue.length === 0) return;
         if (this.closed) {
-            if (queued.queueTimer) clearTimeout(queued.queueTimer);
-            queued.reject(operationalError("lateon_cancelled", "LateOn reranker is closed."));
+            const cancellation = operationalError("lateon_cancelled", "LateOn reranker is closed.");
+            for (const queued of this.queue.splice(0)) queued.reject(cancellation);
             return;
         }
         if (this.workerState !== "ready") {
-            if (queued.queueTimer) clearTimeout(queued.queueTimer);
-            queued.reject(operationalError(
-                "lateon_not_ready",
-                "LateOn worker became unavailable while the request was queued.",
-            ));
+            void this.waitUntilReady().then(
+                () => this.startQueuedIfPossible(),
+                (error: unknown) => {
+                    const failure = error instanceof Error ? error : new Error(String(error));
+                    for (const queued of this.queue.splice(0)) queued.reject(failure);
+                },
+            );
+            return;
+        }
+        const queued = this.queue.shift();
+        if (!queued) return;
+        if (queued.signal?.aborted) {
+            queued.reject(operationalError("lateon_cancelled", "LateOn rerank was cancelled."));
+            this.startQueuedIfPossible();
             return;
         }
         this.startExecution(queued);
@@ -694,30 +590,10 @@ export class LateOnReranker implements Reranker {
         }
         const executionStartedAt = request.executionStartedAt ?? Date.now();
         const queueWaitMs = Math.max(0, executionStartedAt - request.offeredAt);
-        const stageRemaining = request.offeredAt
-            + this.effectiveBounds.maximumRerankerStageMilliseconds
-            - Date.now();
-        if (stageRemaining <= 0) {
-            this.reportExecutionDiagnostics(request, {
-                attempts: 1,
-                retries: 0,
-                timeouts: 1,
-                queueWaitMs,
-                effectiveStageDeadlineMs: stageRemaining,
-                observedWallMs: Date.now() - executionStartedAt,
-            });
-            throw operationalError(
-                "lateon_execution_timeout",
-                "LateOn reranker-stage deadline expired before execution.",
-            );
-        }
-        const timeoutMilliseconds = Math.min(
-            this.effectiveBounds.maximumScoreMilliseconds,
-            stageRemaining,
-        );
+        const timeoutMilliseconds = LATEON_HARD_OPERATION_TIMEOUT_MS;
         const timeoutError = operationalError(
             "lateon_execution_timeout",
-            `LateOn scoring exceeded its ${timeoutMilliseconds} ms effective deadline.`,
+            `LateOn scoring exceeded the ${timeoutMilliseconds} ms hard safety ceiling.`,
         );
         const requestId = this.nextRequestId++;
         let timeout: NodeJS.Timeout | undefined;
@@ -767,7 +643,6 @@ export class LateOnReranker implements Reranker {
                 timeouts: 0,
                 queueWaitMs,
                 effectiveScoreDeadlineMs: timeoutMilliseconds,
-                effectiveStageDeadlineMs: stageRemaining,
                 observedWallMs: Date.now() - executionStartedAt,
             });
             return results;
@@ -784,7 +659,6 @@ export class LateOnReranker implements Reranker {
                     timeouts: classified.reason === "lateon_execution_timeout" ? 1 : 0,
                     queueWaitMs,
                     effectiveScoreDeadlineMs: timeoutMilliseconds,
-                    effectiveStageDeadlineMs: stageRemaining,
                     observedWallMs,
                     ...(classified.reason === "lateon_execution_timeout"
                         ? { deadlineLatenessMs: Math.max(0, observedWallMs - timeoutMilliseconds) }
@@ -899,12 +773,7 @@ export class LateOnReranker implements Reranker {
         this.workerState = "closed";
         const cancellation = operationalError("lateon_cancelled", "LateOn reranker is closed.");
         this.rejectReadiness(cancellation);
-        const queued = this.queued;
-        this.queued = null;
-        if (queued) {
-            if (queued.queueTimer) clearTimeout(queued.queueTimer);
-            queued.reject(cancellation);
-        }
+        for (const queued of this.queue.splice(0)) queued.reject(cancellation);
         await this.stopWorker(cancellation, false);
         await this.activeTask?.catch(() => undefined);
     }

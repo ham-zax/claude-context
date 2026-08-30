@@ -16,7 +16,7 @@ import {
 } from "./lateon-model-store.js";
 
 const REVISION = "07ef20f406c86badca122464808f4cac2f6e4b25";
-const FROZEN_PROFILE_SHA256 = "ecf84e7bd10ecdcb6b44ac9e0ad86f1a34986e5ee607eceec5b5724dcd29ecd8";
+const FROZEN_PROFILE_SHA256 = "04958f55784968a2a45c1499adc2fcb706dcd23e9813c8e8da7e3f31f43777f6";
 const SHIPPED_MCP_PACKAGE_ROOT = fileURLToPath(new URL("../../mcp/", import.meta.url));
 
 function digest(content: string | Buffer): string {
@@ -30,7 +30,7 @@ function writeAcquisitionFixture(
     const assetsRoot = path.join(runtimePackageRoot, "assets", "lateon");
     fs.mkdirSync(assetsRoot, { recursive: true });
     const profile = {
-        schemaVersion: "satori_lateon_runtime_profile_v4",
+        schemaVersion: "satori_lateon_runtime_profile_v5",
         profileId: DEFAULT_LATEON_PROFILE_ID,
         identity: {
             repository: "lightonai/LateOn-Code-edge",
@@ -44,7 +44,7 @@ function writeAcquisitionFixture(
         })),
     };
     const profileBytes = Buffer.from(JSON.stringify(profile, null, 2), "utf8");
-    fs.writeFileSync(path.join(assetsRoot, "runtime-profile-v4-d32.json"), profileBytes);
+    fs.writeFileSync(path.join(assetsRoot, "runtime-profile-v5-d32.json"), profileBytes);
     const entries = Object.entries(artifacts).map(([artifactPath, content]) => ({
         path: artifactPath,
         sizeBytes: Buffer.byteLength(content, "utf8"),
@@ -64,7 +64,7 @@ function writeAcquisitionFixture(
         },
     };
     fs.writeFileSync(
-        path.join(assetsRoot, "runtime-profile-v4-d32.acquisition.json"),
+        path.join(assetsRoot, "runtime-profile-v5-d32.acquisition.json"),
         JSON.stringify(manifest, null, 2),
         "utf8",
     );
@@ -102,7 +102,7 @@ function stagingLeftovers(homeDir: string): string[] {
 
 test("shipped dry-run profile ID equals the frozen shipped profile ID", () => {
     const profile = JSON.parse(fs.readFileSync(
-        path.join(SHIPPED_MCP_PACKAGE_ROOT, "assets", "lateon", "runtime-profile-v4-d32.json"),
+        path.join(SHIPPED_MCP_PACKAGE_ROOT, "assets", "lateon", "runtime-profile-v5-d32.json"),
         "utf8",
     ));
     assert.equal(profile.profileId, DEFAULT_LATEON_PROFILE_ID);
@@ -190,7 +190,7 @@ test("LateOn model store rejects a profile outside the pinned D32 authority", as
             runtimePackageRoot,
             "assets",
             "lateon",
-            "runtime-profile-v4-d32.json",
+            "runtime-profile-v5-d32.json",
         );
         const profile = JSON.parse(fs.readFileSync(profilePath, "utf8"));
         profile.identity.revision = "f".repeat(40);
@@ -208,7 +208,7 @@ test("LateOn model store rejects an acquisition manifest that does not bind the 
             runtimePackageRoot,
             "assets",
             "lateon",
-            "runtime-profile-v4-d32.acquisition.json",
+            "runtime-profile-v5-d32.acquisition.json",
         );
         const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
         manifest.runtimeProfileSha256 = "0".repeat(64);
@@ -226,7 +226,7 @@ test("LateOn model store rejects an unsafe artifact path", async () => {
             runtimePackageRoot,
             "assets",
             "lateon",
-            "runtime-profile-v4-d32.acquisition.json",
+            "runtime-profile-v5-d32.acquisition.json",
         );
         const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
         manifest.artifacts[0].path = "../escaped.onnx";
@@ -431,7 +431,7 @@ test("production model acquisition binds the exact frozen profile digest", async
             runtimePackageRoot,
             "assets",
             "lateon",
-            "runtime-profile-v4-d32.json",
+            "runtime-profile-v5-d32.json",
         );
         const profile = JSON.parse(fs.readFileSync(profilePath, "utf8"));
         const reserialized = Buffer.from(JSON.stringify(profile), "utf8");
@@ -440,7 +440,7 @@ test("production model acquisition binds the exact frozen profile digest", async
             runtimePackageRoot,
             "assets",
             "lateon",
-            "runtime-profile-v4-d32.acquisition.json",
+            "runtime-profile-v5-d32.acquisition.json",
         );
         const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
         manifest.runtimeProfileSha256 = digest(reserialized);
@@ -464,7 +464,7 @@ test("production explicit model verification binds the exact frozen profile dige
             runtimePackageRoot,
             "assets",
             "lateon",
-            "runtime-profile-v4-d32.json",
+            "runtime-profile-v5-d32.json",
         );
         const profile = JSON.parse(fs.readFileSync(profilePath, "utf8"));
         const reserialized = Buffer.from(JSON.stringify(profile), "utf8");
@@ -473,7 +473,7 @@ test("production explicit model verification binds the exact frozen profile dige
             runtimePackageRoot,
             "assets",
             "lateon",
-            "runtime-profile-v4-d32.acquisition.json",
+            "runtime-profile-v5-d32.acquisition.json",
         );
         const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
         manifest.runtimeProfileSha256 = digest(reserialized);

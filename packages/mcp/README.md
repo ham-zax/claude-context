@@ -113,21 +113,19 @@ In a fresh two-task OpenCode comparison where both arms answered correctly, Sato
 - Managed offline Potion + LanceDB clients on Linux x64/WSL2 share one private
   local host. Connected providers, Milvus, and explicit Ollama runtimes keep
   the direct per-client lifecycle.
-- LateOn projection-v4 D32 is the default profile whenever LateOn reranking is
-  selected. Managed offline installs select it automatically; the default is
-  enabled through an explicit owner activation decision scoped to Linux
-  x64/WSL2 managed offline installations, and D32 is operationally qualified
-  but not held-out qualified. Direct runtimes enable it when
+- LateOn projection-v4 D32 is the semantic reranking contract whenever LateOn
+  is selected. Managed offline installs bind
+  `lateon_offline_quality_projection_v5_d32_v1` automatically. The v5 profile
+  pins the model, artifacts, projection, candidate depth, and sequential CPU
+  execution semantics, but does not encode machine-speed assumptions such as
+  queue wait, scoring latency, or a fixed CPU thread count. One local worker
+  serves overlapping searches through a FIFO queue; each request is reranked
+  unless it is cancelled, the worker genuinely fails, or the hard safety
+  ceiling is exceeded. Direct runtimes enable LateOn when
   `SATORI_RERANKER_PROVIDER=lateon` and an absolute `SATORI_LATEON_MODEL_PATH`
-  are configured. The model directory is shared outside versioned MCP runtimes,
-  artifact digests are verified, inference runs in a killable worker, and every
-  failure falls back atomically to exact + BM25 + single-vector ordering.
-  `SATORI_LATEON_PROFILE` may explicitly select
-  `lateon_offline_quality_projection_v4_d32_v1` (the default),
-  `lateon_offline_quality_projection_v3_d32_v2` (previous managed default,
-  migrated by `satori upgrade`), `lateon_offline_quality_projection_v2_d32_v2`,
-  `lateon_projection_v1_d16_legacy`, or `lateon_projection_v2_d16_v1`;
-  the runtime never substitutes one depth for the other.
+  are configured. Older LateOn profile IDs are recognized only for migration
+  guidance and cannot execute; `satori upgrade` migrates managed installations
+  to v5.
   `SATORI_RERANKER_PROVIDER=none` is the explicit opt-out: with Ollama embeddings
   it means the selected embedding provider plus baseline ordering, not
   "Potion + BM25". Automatic failure fallback and explicit opt-out are different

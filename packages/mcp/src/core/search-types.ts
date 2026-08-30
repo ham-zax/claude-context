@@ -645,8 +645,6 @@ export interface SearchDebugHint {
 export type SearchRerankerOperationalReason =
     | "lateon_applied"
     | "lateon_not_ready"
-    | "lateon_capacity_fallback"
-    | "lateon_queue_timeout"
     | "lateon_execution_timeout"
     | "lateon_cancelled"
     | "lateon_invalid_output"

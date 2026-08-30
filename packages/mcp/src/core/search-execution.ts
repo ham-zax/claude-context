@@ -97,8 +97,6 @@ export type SearchOrderAuthority = "retrieval_order" | "reranker_order";
 const SEARCH_EXPANSION_MIN_PRIMARY_SCOPED_CANDIDATES = 5;
 const LATEON_OPERATIONAL_REASONS = new Set<SearchRerankerOperationalReason>([
     "lateon_not_ready",
-    "lateon_capacity_fallback",
-    "lateon_queue_timeout",
     "lateon_execution_timeout",
     "lateon_cancelled",
     "lateon_invalid_output",

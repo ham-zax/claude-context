@@ -5,6 +5,7 @@ export const LATEON_RUNTIME_PROFILE_IDS = Object.freeze({
     contextV3D32: "lateon_offline_quality_projection_v3_d32_v1",
     contextV3D32Activated: "lateon_offline_quality_projection_v3_d32_v2",
     contextV4D32: "lateon_offline_quality_projection_v4_d32_v1",
+    contextV5D32: "lateon_offline_quality_projection_v5_d32_v1",
 } as const);
 
 export type LateOnRuntimeProfileId =
@@ -21,12 +22,14 @@ export const LATEON_RETIRED_RUNTIME_PROFILE_IDS = Object.freeze([
     LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
     LATEON_RUNTIME_PROFILE_IDS.contextV3D32,
     LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated,
+    LATEON_RUNTIME_PROFILE_IDS.contextV4D32,
 ] as const);
 
 export const LATEON_ACTIVATION_POLICY_IDS = Object.freeze({
     ownerDefaultD32V2: "lateon_d32_owner_default_v1",
     ownerDefaultContextV3: "lateon_context_v3_d32_owner_default_v1",
     ownerDefaultContextV4: "lateon_context_v4_d32_owner_default_v1",
+    ownerDefaultContextV5: "lateon_context_v5_d32_owner_default_v1",
 } as const);
 
 export type LateOnActivationPolicyId =
@@ -70,15 +73,14 @@ type LateOnRuntimeProfileBase = Readonly<{
         documentSkipTokenIds: readonly number[];
         candidateDepth: number;
         documentBatchSize: 1;
-        profileIntraOpThreads: number;
         interOpThreads: number;
     }>;
 }>;
 
-export type LateOnRuntimeProfileV4 = LateOnRuntimeProfileBase & Readonly<{
-    schemaVersion: "satori_lateon_runtime_profile_v4";
-    profileId: typeof LATEON_RUNTIME_PROFILE_IDS.contextV4D32;
-    qualificationStatus: "owner_activated_operationally_qualified_not_held_out";
+export type LateOnRuntimeProfileV5 = LateOnRuntimeProfileBase & Readonly<{
+    schemaVersion: "satori_lateon_runtime_profile_v5";
+    profileId: typeof LATEON_RUNTIME_PROFILE_IDS.contextV5D32;
+    qualificationStatus: "owner_activated_not_held_out";
     identity: LateOnRuntimeProfileBase["identity"] & Readonly<{
         projectionVersion: "search_rerank_document_v4";
         projectionSha256: string;
@@ -99,27 +101,9 @@ export type LateOnRuntimeProfileV4 = LateOnRuntimeProfileBase & Readonly<{
         truncationStrategy: "longest_suffix_discarded";
         warmupRequests: number;
     }>;
-    operationalBounds: Readonly<{
-        maximumActiveReranks: 1;
-        maximumQueuedReranks: 1;
-        maximumQueueWaitMilliseconds: number;
-        maximumReadinessMilliseconds: number;
-        maximumScoreMilliseconds: number;
-        maximumRerankerStageMilliseconds: number;
-        maximumProcessPeakRssBytes: number;
-        maximumProcessRetainedRssBytes: number;
-    }>;
 }>;
 
-export type LateOnRuntimeProfile = LateOnRuntimeProfileV4;
-
-export type LateOnEffectiveOperationalBounds = Readonly<{
-    maximumActiveReranks: 0 | 1;
-    maximumQueuedReranks: 0 | 1;
-    maximumQueueWaitMilliseconds: number;
-    maximumScoreMilliseconds: number;
-    maximumRerankerStageMilliseconds: number;
-}>;
+export type LateOnRuntimeProfile = LateOnRuntimeProfileV5;
 
 export type LateOnWorkerRequest =
     | Readonly<{

@@ -36,12 +36,6 @@ export type SharedRuntimeIdentity = Readonly<{
     lateOnModelPath: string;
     lateOnProfile: string;
     lateOnActivationPolicy: string;
-    lateOnRequestDeadlineMs: string;
-    lateOnMaximumQueueWaitMs: string;
-    lateOnRerankerStageDeadlineMs: string;
-    lateOnMaximumActiveReranks: string;
-    lateOnMaximumQueuedReranks: string;
-    lateOnIntraOpThreads: string;
     lateOnRequestContractSha256: string;
     vectorStoreProvider: string;
     lanceDbPath: string;
@@ -178,19 +172,12 @@ export function buildSharedRuntimeIdentity(
             : "",
         lateOnProfile: env.SATORI_LATEON_PROFILE
             ?? (env.SATORI_RERANKER_PROVIDER === "lateon"
-                ? LATEON_RUNTIME_PROFILE_IDS.contextV4D32
+                ? LATEON_RUNTIME_PROFILE_IDS.contextV5D32
                 : ""),
         lateOnActivationPolicy: env.SATORI_LATEON_ACTIVATION_POLICY
             ?? (env.SATORI_RERANKER_PROVIDER === "lateon" && env.SATORI_LATEON_PROFILE === undefined
-                ? LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV4
+                ? LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV5
                 : ""),
-        lateOnRequestDeadlineMs: env.SATORI_LATEON_REQUEST_DEADLINE_MS ?? "",
-        lateOnMaximumQueueWaitMs: env.SATORI_LATEON_MAX_QUEUE_WAIT_MS ?? "",
-        lateOnRerankerStageDeadlineMs:
-            env.SATORI_LATEON_RERANKER_STAGE_DEADLINE_MS ?? "",
-        lateOnMaximumActiveReranks: env.SATORI_LATEON_MAX_ACTIVE_RERANKS ?? "",
-        lateOnMaximumQueuedReranks: env.SATORI_LATEON_MAX_QUEUED_RERANKS ?? "",
-        lateOnIntraOpThreads: env.SATORI_LATEON_INTRA_OP_THREADS ?? "",
         lateOnRequestContractSha256: resolveLateOnRequestContractDigest(env),
         vectorStoreProvider: env.VECTOR_STORE_PROVIDER ?? "",
         lanceDbPath: env.LANCEDB_PATH

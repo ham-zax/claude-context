@@ -759,11 +759,11 @@ test("offline install plan composes Potion embeddings with LateOn D32 reranking"
         assert.equal(result.runtimeEnvironment.SATORI_LATEON_MODEL_PATH, lateOnModelPath);
         assert.equal(
             result.runtimeEnvironment.SATORI_LATEON_PROFILE,
-            "lateon_offline_quality_projection_v4_d32_v1",
+            "lateon_offline_quality_projection_v5_d32_v1",
         );
         assert.equal(
             result.runtimeEnvironment.SATORI_LATEON_ACTIVATION_POLICY,
-            "lateon_context_v4_d32_owner_default_v1",
+            "lateon_context_v5_d32_owner_default_v1",
         );
     } finally {
         fs.rmSync(homeDir, { recursive: true, force: true });
@@ -836,11 +836,11 @@ test("new offline install persists Potion embeddings and LateOn D32 in the manag
         assert.equal(launcherEnvironment.SATORI_RERANKER_PROVIDER, "lateon");
         assert.equal(
             launcherEnvironment.SATORI_LATEON_PROFILE,
-            "lateon_offline_quality_projection_v4_d32_v1",
+            "lateon_offline_quality_projection_v5_d32_v1",
         );
         assert.equal(
             launcherEnvironment.SATORI_LATEON_ACTIVATION_POLICY,
-            "lateon_context_v4_d32_owner_default_v1",
+            "lateon_context_v5_d32_owner_default_v1",
         );
         const expectedModelDirectory = path.join(
             homeDir,
@@ -951,7 +951,7 @@ test("managed offline install acquires the pinned LateOn closure before activati
         assert.equal(launcherEnvironment.SATORI_RERANKER_PROVIDER, "lateon");
         assert.equal(
             launcherEnvironment.SATORI_LATEON_ACTIVATION_POLICY,
-            "lateon_context_v4_d32_owner_default_v1",
+            "lateon_context_v5_d32_owner_default_v1",
         );
         assert.equal(fs.existsSync(launcherEnvironment.SATORI_LATEON_MODEL_PATH), true);
     } finally {
@@ -1370,11 +1370,11 @@ test("managed D16 + CLI --reranker lateon migrates to D32", async () => {
         assert.equal(launcherEnvironment.SATORI_RERANKER_PROVIDER, "lateon");
         assert.equal(
             launcherEnvironment.SATORI_LATEON_PROFILE,
-            "lateon_offline_quality_projection_v4_d32_v1",
+            "lateon_offline_quality_projection_v5_d32_v1",
         );
         assert.equal(
             launcherEnvironment.SATORI_LATEON_ACTIVATION_POLICY,
-            "lateon_context_v4_d32_owner_default_v1",
+            "lateon_context_v5_d32_owner_default_v1",
         );
     } finally {
         fs.rmSync(homeDir, { recursive: true, force: true });
@@ -1451,7 +1451,7 @@ test("Linux x64 with implicit Potion defaults to LateOn D32", async () => {
         assert.equal(result.runtimeEnvironment?.SATORI_RERANKER_PROVIDER, "lateon");
         assert.equal(
             result.runtimeEnvironment?.SATORI_LATEON_PROFILE,
-            "lateon_offline_quality_projection_v4_d32_v1",
+            "lateon_offline_quality_projection_v5_d32_v1",
         );
     } finally {
         fs.rmSync(homeDir, { recursive: true, force: true });
@@ -1490,7 +1490,7 @@ test("Linux x64 with implicit Ollama defaults to LateOn D32", async () => {
         assert.equal(result.runtimeEnvironment?.SATORI_RERANKER_PROVIDER, "lateon");
         assert.equal(
             result.runtimeEnvironment?.SATORI_LATEON_PROFILE,
-            "lateon_offline_quality_projection_v4_d32_v1",
+            "lateon_offline_quality_projection_v5_d32_v1",
         );
         assert.equal(result.runtimeEnvironment?.OLLAMA_MODEL, "nomic-embed-text:latest");
     } finally {
@@ -1617,11 +1617,11 @@ test("existing managed D32 stays D32", async () => {
         assert.equal(result.runtimeEnvironment?.SATORI_RERANKER_PROVIDER, "lateon");
         assert.equal(
             result.runtimeEnvironment?.SATORI_LATEON_PROFILE,
-            "lateon_offline_quality_projection_v4_d32_v1",
+            "lateon_offline_quality_projection_v5_d32_v1",
         );
         assert.equal(
             result.runtimeEnvironment?.SATORI_LATEON_ACTIVATION_POLICY,
-            "lateon_context_v4_d32_owner_default_v1",
+            "lateon_context_v5_d32_owner_default_v1",
         );
     } finally {
         fs.rmSync(homeDir, { recursive: true, force: true });
@@ -1986,7 +1986,7 @@ function failingOfflineLateOnReinstall(
                 fixture.mcpRoot,
                 "assets",
                 "lateon",
-                "runtime-profile-v4-d32.acquisition.json",
+                "runtime-profile-v5-d32.acquisition.json",
             ),
             { force: true },
         );
