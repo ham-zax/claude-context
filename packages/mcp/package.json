@@ -1,7 +1,7 @@
 {
   "name": "@zokizuan/satori-mcp",
   "version": "7.0.0",
-  "description": "Repo-aware MCP tools for AI coding agents: intent search, symbol navigation, advisory call graphs, exact reads, and freshness-aware recovery.",
+  "description": "Local-first code intelligence for AI coding agents: hybrid repository search, exact symbol/source navigation, structural outlines, conservative call relationships, and freshness-aware indexing.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

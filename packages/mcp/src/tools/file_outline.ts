@@ -82,7 +82,7 @@ function formatWorkspaceAuthorizationError(
 
 export const fileOutlineTool: McpTool = {
     name: 'file_outline',
-    description: () => 'Return a sidecar-backed symbol outline for one file, including call_graph jump handles. Use detail=\"analysis\" for on-demand Python or Go structural metrics or detail=\"relationships\" for generation-bound direct relationship metadata; both require exact canonical symbol identity.',
+    description: () => 'Return indexed symbols for one file, with call_graph jump handles when available. Use detail="summary" for structure, detail="analysis" for Python/Go structural metrics, or detail="relationships" for direct relationship metadata. analysis/relationships require an exact canonical symbol.',
     inputSchemaZod: () => fileOutlineInputSchema,
     execute: async (args: unknown, ctx: ToolContext) => {
         const parsed = fileOutlineInputSchema.safeParse(args || {});

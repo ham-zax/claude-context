@@ -360,6 +360,8 @@ export class SharedRuntimeHost {
     }
 }
 
+const SATORI_MCP_INSTRUCTIONS = "Satori is a repository code-intelligence layer for coding agents. Use search_codebase for unfamiliar behavior, ownership, symbols, configuration, or related implementation; then follow recommendedNextAction into read_file, file_outline, continue_search, or call_graph. Prefer the host's native exact-file or literal workflow when the path and location are already known or the edit is small and local. Treat call_graph as conservative navigation evidence, not complete blast-radius proof. Use list_codebases or manage_index status when index readiness is uncertain. Ask before create, reindex, or clear.";
+
 export class McpSession {
     private readonly server: Server;
     private readonly continuationCoordinator: SearchContinuationCoordinator;
@@ -386,6 +388,7 @@ export class McpSession {
                 capabilities: {
                     tools: {},
                 },
+                instructions: SATORI_MCP_INSTRUCTIONS,
             },
         );
         this.resources = host.createSessionResources(

@@ -15,7 +15,7 @@ const comparePathAsc = (a: string, b: string): number => (a < b ? -1 : a > b ? 1
 
 export const listCodebasesTool: McpTool = {
     name: "list_codebases",
-    description: () => "List tracked codebases and their indexing state.",
+    description: () => "List known Satori codebases and their Publication/index readiness. Use this when the target root or readiness is unknown; use manage_index status for detailed capabilities or diagnostics.",
     inputSchemaZod: () => listCodebasesInputSchema,
     execute: async (args: unknown, ctx: ToolContext) => {
         const normalizedArgs = (args ?? {}) as Record<string, unknown>;

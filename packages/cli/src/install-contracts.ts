@@ -73,18 +73,18 @@ export const LAUNCHER_OWNED_RUNTIME_ENV_VARS = [
 
 export const SATORI_AGENT_INSTRUCTIONS = `# Satori MCP
 
-Satori MCP is available for semantic ownership and freshness-aware code discovery. Prefer it for unfamiliar behavior, related implementation, or index state. Use the usual/native workflow for known paths, exact literals, and small local edits.
+Satori is a repository code-intelligence layer for coding agents. Use it for unfamiliar behavior, ownership, symbols, configuration, related implementation, or index readiness. Prefer the usual/native workflow when the exact path or literal is already known or the edit is small and local.
 
 ## Priority Order
-1. \`search_codebase\` — find behavior or ownership by intent
-2. \`continue_search\` — reveal more from the same frozen result when useful
-3. \`read_file\` / \`file_outline\` — inspect exact source or structure
-4. \`call_graph\` — inspect advisory relationships for graph-ready targets
-5. \`list_codebases\` / \`manage_index\` — inspect index state
+1. \`search_codebase\` — run hybrid repository search and follow \`recommendedNextAction\`
+2. \`continue_search\` — reveal more from the same frozen ranking when returned
+3. \`read_file\` / \`file_outline\` — inspect exact source or indexed structure
+4. \`call_graph\` — inspect conservative relationships for graph-ready targets
+5. \`list_codebases\` / \`manage_index status\` — inspect index readiness and capabilities
 
 ## Boundaries
-- Follow \`recommendedNextAction\` and read \`warnings[].action\`.
-- Treat inbound \`call_graph\` results as leads to verify, not complete blast-radius proof.
+- Read \`warnings[].action\` and follow structured remediation.
+- Treat \`call_graph\` as navigation evidence, not complete blast-radius proof; verify important inbound impact.
 - If Satori reports \`requires_reindex\`, report the reason. Ask before \`create\`, \`reindex\`, or \`clear\`.
 `;
 
