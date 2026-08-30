@@ -527,23 +527,6 @@ export function createMcpConfig(): ContextMcpConfig {
         );
     }
 
-    const parseOptionalPositiveInteger = (
-        variable: string,
-        maximum?: number,
-    ): number | undefined => {
-        const raw = envManager.get(variable);
-        if (!raw) return undefined;
-        const parsed = Number(raw);
-        if (
-            !Number.isSafeInteger(parsed)
-            || parsed <= 0
-            || (maximum !== undefined && parsed > maximum)
-        ) {
-            const suffix = maximum === undefined ? '' : ` and at most ${maximum}`;
-            throw new Error(`${variable} must be a positive safe integer${suffix}.`);
-        }
-        return parsed;
-    };
     const lateOnProfileRaw = rerankerProvider === 'lateon'
         ? envManager.get('SATORI_LATEON_PROFILE')
         : undefined;
