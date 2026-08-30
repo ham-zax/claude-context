@@ -139,7 +139,6 @@ interface EvaluatedDoctorRuntimeContext extends DoctorRuntimeContext {
 
 const PACKAGE_VERSION_NOTE =
     "Satori ships independent package versions (cli, mcp, core). Doctor reports the installed set for support and debugging; versions need not match each other.";
-const requireFromHere = createRequire(import.meta.url);
 const MAX_DIAGNOSTIC_DETAILS = 10;
 const SUPPORTED_DOCTOR_CLIENTS = ["codex", "claude", "opencode"] as const satisfies readonly ManagedClientConfigProof["client"][];
 const DISPLAYED_RUNTIME_PROFILES = new Set<NonNullable<DoctorRuntimeConfiguration["profile"]>>(["connected", "offline"]);

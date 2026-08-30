@@ -3,7 +3,6 @@ import { CliError } from "./errors.js";
 
 const CLI_PACKAGE_NAME = "@zokizuan/satori-cli";
 const MANAGED_PACKAGE_NAME = "@zokizuan/satori-mcp";
-const CORE_PACKAGE_NAME = "@zokizuan/satori-core";
 
 type ExecFileSyncLike = typeof execFileSync;
 
