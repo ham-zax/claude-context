@@ -4,30 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="../logo.svg" />
-    <title>Satori Docs | Local Repository Intelligence for Coding Agents</title>
+    <title>Satori Docs | Symbol + AST Intelligence for MCP Coding Agents</title>
     <meta
       name="description"
-      content="Current Satori documentation: install the managed MCP runtime, build atomic Publications, search locally, navigate exact symbols and qualified call graphs, and operate the seven-tool surface safely."
+      content="Install Satori as a local symbol and AST-derived code-intelligence layer for MCP agents: fast offline retrieval, exact ownership, bounded source, qualified calls, and seven operational tools."
     />
     <meta name="keywords" content="Satori docs, MCP install, AI coding agent documentation, semantic code search docs, repo indexing, call graph, code navigation" />
     <meta name="robots" content="index,follow" />
     <link rel="canonical" href="https://satori.hamza.my.id/docs/" />
-    <meta property="og:title" content="Satori Docs | Local Repository Intelligence for Coding Agents" />
-    <meta property="og:description" content="Install Satori, build a Publication, search locally, resolve exact symbols, traverse qualified callers/callees, and manage freshness through seven MCP tools." />
+    <meta property="og:title" content="Satori Docs | Symbol + AST Intelligence for MCP Coding Agents" />
+    <meta property="og:description" content="Give an MCP-compatible coding harness local retrieval, exact symbols, AST-derived structure, bounded source, qualified calls, and freshness-safe Publications." />
     <meta property="og:type" content="article" />
     <meta property="og:url" content="https://satori.hamza.my.id/docs/" />
     <meta property="og:site_name" content="Satori" />
     <meta property="og:image" content="https://satori.hamza.my.id/og-image.svg" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Satori Docs | Local Repository Intelligence for Coding Agents" />
-    <meta name="twitter:description" content="Installer-first setup, Potion + LanceDB local defaults, atomic Publications, exact symbols, qualified call graphs, and seven MCP tools." />
+    <meta name="twitter:title" content="Satori Docs | Symbol + AST Intelligence for MCP Coding Agents" />
+    <meta name="twitter:description" content="Installer-first setup for offline retrieval, exact symbols, AST-derived structure, bounded source, qualified calls, atomic Publications, and seven MCP tools." />
     <meta name="twitter:image" content="https://satori.hamza.my.id/og-image.svg" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "TechArticle",
         "headline": "Satori Docs",
-        "description": "Current documentation for Satori's managed MCP runtime, local retrieval defaults, atomic Publications, semantic search, symbol navigation, qualified call graphs, lifecycle operations, and troubleshooting.",
+        "description": "Current documentation for Satori's MCP code-intelligence runtime: offline retrieval, exact symbols, AST-derived structure, bounded source, qualified call graphs, atomic Publications, and lifecycle operations.",
         "url": "https://satori.hamza.my.id/docs/",
         "author": {
           "@type": "Person",
@@ -46,21 +46,11 @@
         }
       }
     </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      rel="preconnect"
-      href="https://fonts.googleapis.com"
-      media="(min-width: 861px)"
-    />
-    <link
-      rel="preconnect"
-      href="https://fonts.gstatic.com"
-      crossorigin
-      media="(min-width: 861px)"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@100;400;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap"
       rel="stylesheet"
-      media="(min-width: 861px)"
     />
     <style>
       :root {
@@ -162,19 +152,6 @@
         transition: top 0.2s ease;
       }
       .skip-link:focus { top: 1rem; }
-
-      /* Scroll progress */
-      .scroll-progress {
-        position: fixed;
-        top: 0;
-        left: 0;
-        height: 2px;
-        width: 0%;
-        background: var(--accent);
-        box-shadow: 0 0 8px var(--accent);
-        z-index: 200;
-        transition: width 0.1s ease-out;
-      }
 
       /* Back-to-top */
       .back-to-top {
@@ -620,7 +597,6 @@
         .step { grid-template-columns: 1fr; }
         .footer { grid-template-columns: 1fr; }
         .back-to-top { display: none; }
-        .scroll-progress { display: none; }
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -629,24 +605,24 @@
         *, *::before, *::after { transition-duration: 0.01ms !important; }
       }
     </style>
+    <link rel="stylesheet" href="../site.css" />
   </head>
-  <body>
-    <div class="scroll-progress" id="scrollProgress" aria-hidden="true"></div>
-    <button class="back-to-top" id="backToTop" aria-label="Back to top" title="Back to top">&uarr;</button>
+  <body class="page-docs">
+    <button class="back-to-top" id="backToTop" aria-label="Back to top" title="Back to top" tabindex="-1">&uarr;</button>
     <div class="bg-grid"></div>
     <div class="ambient-energy"></div>
 
     <div class="container">
       <a class="skip-link" href="#main">Skip to content</a>
       <nav aria-label="Primary">
-        <div class="nav-brand">
-          <img class="nav-brand-logo" src="../logo-mark.svg" alt="Satori logo" width="35" height="36" />
+        <a class="nav-brand" href="../index.html" aria-label="Satori home">
+          <img class="nav-brand-logo" src="../logo-mark.svg" alt="" aria-hidden="true" width="35" height="36" />
           <span>Satori</span>
-        </div>
+        </a>
         <div class="nav-links">
           <a href="../index.html">Landing</a>
           <a href="../architecture.html">Architecture</a>
-          <a href="https://github.com/ham-zax/satori" target="_blank" rel="noopener noreferrer">Repository</a>
+          <a href="https://github.com/ham-zax/satori" target="_blank" rel="noopener noreferrer">GitHub</a>
           <a href="../index.html#contact" class="cta-contact">Contact</a>
         </div>
       </nav>
@@ -656,10 +632,10 @@
         <div class="eyebrow">Current product documentation</div>
         <h1>Satori Docs</h1>
         <p class="hero-copy">
-          Satori is a local-first repository intelligence layer for MCP coding
-          agents. This page documents the current seven-tool surface, atomic
-          Publication lifecycle, local Potion + LanceDB defaults, production
-          symbol navigation, and conservative CALLS v0 behavior.
+          Give any MCP-compatible coding harness exact symbols, AST-derived structural
+          evidence, bounded source, hybrid retrieval, and conservative CALLS v0
+          navigation through seven tools. On Linux x64 / WSL2, the qualified default
+          works offline after installation with Potion + BM25 + LateOn + LanceDB.
         </p>
         <nav class="quick-links" aria-label="Docs sections">
           <a href="#install">Install</a>
@@ -678,9 +654,10 @@
       <section class="section" id="install">
         <h2>Install the MCP Server</h2>
         <p class="lede">
-          Satori runs as an MCP server. The easiest path is the CLI installer:
-          it writes managed client config and concise workflow guidance without
-          adding new MCP tools.
+          Satori runs as an MCP server, so a compatible coding harness gains the
+          code-intelligence layer without implementing its own parser, symbol index,
+          retrieval stack, or call-navigation surface. The CLI installs the managed
+          runtime and client configuration.
         </p>
         <div class="callout">
           <p>
@@ -942,9 +919,11 @@ profile = "minimal"</code></pre>
             <h3>Offline Potion</h3>
             <pre><code>npx -y @zokizuan/satori-cli@latest install --runtime offline</code></pre>
             <p>
-              Uses the bundled Potion embedding runtime with LanceDB. Qualified
-              Linux x64/WSL2 installs default to LateOn reranking; add
-              <code>--reranker none</code> to disable neural reranking.
+              Uses local Potion embeddings with BM25 and LanceDB. Qualified Linux
+              x64/WSL2 installs default to LateOn reranking; add
+              <code>--reranker none</code> to disable neural reranking. Once installed,
+              the qualified offline runtime requires no model API key and is designed
+              for zero Satori runtime network requests.
             </p>
           </div>
           <div class="panel">
@@ -972,6 +951,17 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
               not accepted with the offline runtime.
             </p>
           </div>
+        </div>
+        <div class="callout">
+          <p>
+            <strong>Measured on Satori:</strong> warm Potion + LanceDB search reached
+            154.543 ms p95 across 10,830 chunks. Owner-oriented retrieval and bounded
+            source reads are designed to cut repository-discovery token waste dramatically
+            instead of feeding broad files into the model. An exploratory six-repo LateOn
+            tuning run reached 0.5046 MRR versus 0.2900
+            without reranking across 36 owner-discovery tasks; that MRR result is tuning
+            evidence, not a held-out release guarantee.
+          </p>
         </div>
       </section>
 
@@ -1522,43 +1512,48 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
 
       <footer class="footer">
         <div class="footer-col">
-          <img class="footer-brand-logo" src="../logo-mark.svg" alt="Satori logo" width="39" height="40" />
-          <h5>Satori</h5>
-          <p>Fast local repository intelligence for coding agents before they edit.</p>
+          <a class="footer-brand-home" href="../index.html" aria-label="Satori home">
+            <img class="footer-brand-logo" src="../logo-mark.svg" alt="" aria-hidden="true" width="39" height="40" />
+            <span class="footer-heading">Satori</span>
+          </a>
+          <p>Symbol + AST-derived repository intelligence for MCP coding agents.</p>
         </div>
         <div class="footer-col">
-          <h5>Resources</h5>
+          <div class="footer-heading">Resources</div>
           <a href="../index.html">Landing</a>
           <a href="../architecture.html">Architecture</a>
           <a href="https://github.com/ham-zax/satori" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+          <a href="https://www.npmjs.com/package/@zokizuan/satori-cli" target="_blank" rel="noopener noreferrer">npm Package</a>
+          <a href="https://www.producthunt.com/products/satori-4" target="_blank" rel="noopener noreferrer">Product Hunt</a>
         </div>
         <div class="footer-col">
-          <h5>Contact</h5>
+          <div class="footer-heading">Contact</div>
           <a href="mailto:ahmed@hamza.my.id">ahmed@hamza.my.id</a>
           <a href="../index.html#contact">Contact form</a>
           <p style="margin-top:0.5rem;">AGPL-3.0-only open source. Built by Hamza.</p>
         </div>
         <div class="footer-bottom">
           <span>&copy; 2026 Satori. AGPL-3.0-only.</span>
-          <span>Fixed seven-tool surface. Diagnostics through existing tools.</span>
+          <span>Atomic Publications · local-first default · read-only source access.</span>
         </div>
       </footer>
     </div>
 
     <script>
       const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const scrollProgress = document.getElementById("scrollProgress");
       const backToTop = document.getElementById("backToTop");
       let scrollTicking = false;
 
       function updateScrollUI() {
         const scrollTop = window.scrollY;
-        const docHeight = document.documentElement.scrollHeight - window.innerHeight;
-        const pct = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
-        if (scrollProgress) scrollProgress.style.width = pct + "%";
         if (backToTop) {
-          if (scrollTop > 600) backToTop.classList.add("visible");
-          else backToTop.classList.remove("visible");
+          if (scrollTop > 600) {
+            backToTop.classList.add("visible");
+            backToTop.tabIndex = 0;
+          } else {
+            backToTop.classList.remove("visible");
+            backToTop.tabIndex = -1;
+          }
         }
         scrollTicking = false;
       }
@@ -1576,7 +1571,6 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
         });
       }
 
-      updateScrollUI();
     </script>
   </body>
 </html>

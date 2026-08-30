@@ -4,30 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="logo.svg" />
-    <title>Satori Architecture | Atomic Publications and Local Repository Intelligence</title>
+    <title>Satori Architecture | Symbol + AST Intelligence, Offline Retrieval, Atomic Publications</title>
     <meta
       name="description"
-      content="How Satori combines a seven-tool MCP surface, local retrieval, symbol intelligence, conservative call graphs, atomic Publications, freshness gates, and a shared managed runtime."
+      content="How Satori gives MCP-compatible coding harnesses exact symbols, AST-derived structural intelligence, fast offline retrieval, qualified calls, bounded source, and atomic Publication reads."
     />
     <meta name="keywords" content="Satori architecture, MCP server architecture, repository intelligence, semantic code search, symbol registry, call graph, atomic publication, repo indexing, LanceDB" />
     <meta name="robots" content="index,follow" />
     <link rel="canonical" href="https://satori.hamza.my.id/architecture" />
-    <meta property="og:title" content="Satori Architecture | Atomic Local Repository Intelligence" />
-    <meta property="og:description" content="Understand Satori's seven-tool MCP runtime, local retrieval, atomic Publications, production symbol intelligence, qualified CALLS v0 graphs, and freshness safety." />
+    <meta property="og:title" content="Satori Architecture | Symbol + AST Intelligence over MCP" />
+    <meta property="og:description" content="See how Satori turns MCP into a local symbol and AST-derived code-intelligence layer with qualified calls, bounded source, and coherent atomic Publications." />
     <meta property="og:type" content="article" />
     <meta property="og:url" content="https://satori.hamza.my.id/architecture" />
     <meta property="og:site_name" content="Satori" />
     <meta property="og:image" content="https://satori.hamza.my.id/og-image.svg" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Satori Architecture | Atomic Local Repository Intelligence" />
-    <meta name="twitter:description" content="Seven MCP tools over local retrieval, atomic Publications, production symbols, conservative call graphs, and freshness-safe reads." />
+    <meta name="twitter:title" content="Satori Architecture | Symbol + AST Intelligence over MCP" />
+    <meta name="twitter:description" content="A seven-tool MCP surface over fast offline retrieval, exact symbols, AST-derived structure, qualified calls, bounded source, and atomic Publications." />
     <meta name="twitter:image" content="https://satori.hamza.my.id/og-image.svg" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "TechArticle",
         "headline": "Satori Architecture",
-        "description": "Architecture notes for Satori's fixed seven-tool MCP surface, local retrieval, atomic Publications, language intelligence, qualified call graphs, freshness gates, and shared managed runtime.",
+        "description": "Architecture notes for Satori's MCP code-intelligence layer: offline retrieval, exact symbols, AST-derived structure, qualified calls, bounded source, atomic Publications, and freshness gates.",
         "url": "https://satori.hamza.my.id/architecture",
         "author": {
           "@type": "Person",
@@ -46,21 +46,11 @@
         }
       }
     </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      rel="preconnect"
-      href="https://fonts.googleapis.com"
-      media="(min-width: 921px)"
-    />
-    <link
-      rel="preconnect"
-      href="https://fonts.gstatic.com"
-      crossorigin
-      media="(min-width: 921px)"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@100;400;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap"
       rel="stylesheet"
-      media="(min-width: 921px)"
     />
     <style>
       :root {
@@ -805,19 +795,6 @@
         font-weight: 700;
       }
 
-      /* Scroll progress indicator */
-      .scroll-progress {
-        position: fixed;
-        top: 0;
-        left: 0;
-        height: 2px;
-        width: 0%;
-        background: var(--accent);
-        box-shadow: 0 0 8px var(--accent);
-        z-index: 200;
-        transition: width 0.1s ease-out;
-      }
-
       /* Back-to-top button */
       .back-to-top {
         position: fixed;
@@ -903,7 +880,6 @@
       @media (max-width: 768px) {
         .footer { grid-template-columns: 1fr; }
         .back-to-top { display: none; }
-        .scroll-progress { display: none; }
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -1013,10 +989,10 @@
         }
       }
     </style>
+    <link rel="stylesheet" href="site.css" />
   </head>
-  <body>
-  <div class="scroll-progress" id="scrollProgress" aria-hidden="true"></div>
-  <button class="back-to-top" id="backToTop" aria-label="Back to top" title="Back to top">&uarr;</button>
+  <body class="page-architecture">
+  <button class="back-to-top" id="backToTop" aria-label="Back to top" title="Back to top" tabindex="-1">&uarr;</button>
 
   <svg class="bg-accents" viewBox="0 0 100 100" preserveAspectRatio="none">
     <defs>
@@ -1040,13 +1016,13 @@
     <div class="container">
       <a class="skip-link" href="#main">Skip to content</a>
       <nav aria-label="Primary">
-        <div class="nav-brand">
-          <img class="nav-brand-logo" src="logo-mark.svg" alt="Satori logo" width="35" height="36" />
+        <a class="nav-brand" href="index.html" aria-label="Satori home">
+          <img class="nav-brand-logo" src="logo-mark.svg" alt="" aria-hidden="true" width="35" height="36" />
           <span>Satori</span>
-        </div>
+        </a>
         <div class="nav-links">
           <a href="index.html">Landing</a>
-          <a href="https://github.com/ham-zax/satori" target="_blank" rel="noopener noreferrer">Repository</a>
+          <a href="https://github.com/ham-zax/satori" target="_blank" rel="noopener noreferrer">GitHub</a>
           <a href="docs/">Docs</a>
           <a href="index.html#contact" class="cta-contact">Contact</a>
         </div>
@@ -1055,16 +1031,17 @@
       <main id="main">
 
       <section class="hero">
+        <div class="hero-eyebrow">Architecture / Publication authority</div>
         <h1>Satori Architecture</h1>
         <p>
-          Satori serves one coherent repository generation at a time. Semantic
-          retrieval, symbols, structural analysis, relationship evidence, and
-          freshness metadata are published atomically and read through a small
-          MCP surface that fails closed when authority is missing.
+          Satori gives MCP-compatible coding harnesses a code-intelligence layer:
+          intent retrieval, exact symbols, AST-derived structural evidence, qualified
+          calls, and bounded source. One coherent <strong>Publication</strong> keeps
+          every answer on the same repository generation.
         </p>
         <div class="trust-chips" role="list" aria-label="Satori architecture layers">
-          <span class="trust-chip" role="listitem">Seven MCP tools</span>
-          <span class="trust-chip" role="listitem">Potion + LanceDB default</span>
+          <span class="trust-chip" role="listitem">Symbol + AST-derived intelligence</span>
+          <span class="trust-chip" role="listitem">Offline after install</span>
           <span class="trust-chip" role="listitem">Atomic Publications</span>
           <span class="trust-chip" role="listitem">Nine CALLS v0 languages</span>
           <span class="trust-chip" role="listitem">Fail-closed navigation</span>
@@ -1082,7 +1059,7 @@
         </p>
         <div class="diagram-wrap">
 
-          <div class="arch-diagram-wrapper">
+          <div class="arch-diagram-wrapper arch-diagram-desktop">
             <svg class="arch-svg" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
               <defs>
                 <linearGradient id="grad-agent" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -1124,7 +1101,7 @@
               <g transform="translate(300, 10)">
                 <rect width="200" height="70" rx="8" fill="url(#grad-agent)" stroke="rgba(223, 255, 0, 0.5)" stroke-width="2" />
                 <text x="100" y="30" fill="#fff" font-family="sans-serif" font-size="16" font-weight="bold" text-anchor="middle">Agent</text>
-                <text x="100" y="50" fill="rgba(255,255,255,0.6)" font-family="sans-serif" font-size="12" text-anchor="middle">Claude / Codex / Cursor</text>
+                <text x="100" y="50" fill="rgba(255,255,255,0.6)" font-family="sans-serif" font-size="12" text-anchor="middle">Claude / Codex / OpenCode</text>
               </g>
 
               <!-- Tool Registry -->
@@ -1164,6 +1141,39 @@
                 <text x="90" y="50" fill="rgba(255,255,255,0.6)" font-family="sans-serif" font-size="12" text-anchor="middle">File Sync / Merkle / Hash</text>
               </g>
             </svg>
+          </div>
+
+          <div class="arch-mobile-diagram" aria-label="System overview">
+            <div class="arch-mobile-node" data-tone="agent">
+              <strong>Agent</strong>
+              <small>Claude / Codex / OpenCode</small>
+            </div>
+            <div class="arch-mobile-link"><span>request</span></div>
+            <div class="arch-mobile-node">
+              <strong>Tool Registry</strong>
+              <small>Seven MCP tools</small>
+            </div>
+            <div class="arch-mobile-link"><span>dispatch</span></div>
+            <div class="arch-mobile-node" data-tone="runtime">
+              <strong>MCP Runtime</strong>
+              <small>Tool handlers · freshness gate · Publication authority</small>
+            </div>
+            <div class="arch-mobile-link"><span>coordinates</span></div>
+            <div class="arch-mobile-branch">
+              <div class="arch-mobile-branch-label">Runtime dependencies</div>
+              <div class="arch-mobile-node" data-tone="store">
+                <strong>Local Retrieval</strong>
+                <small>Potion / LanceDB</small>
+              </div>
+              <div class="arch-mobile-node" data-tone="store">
+                <strong>Publication</strong>
+                <small>Search · symbols · graph</small>
+              </div>
+              <div class="arch-mobile-node" data-tone="store">
+                <strong>Core Sync</strong>
+                <small>File sync · Merkle · hash</small>
+              </div>
+            </div>
           </div>
 
         </div>
@@ -1377,7 +1387,7 @@
         </p>
         <div class="diagram-wrap">
 
-          <div class="arch-diagram-wrapper">
+          <div class="arch-diagram-wrapper arch-diagram-desktop">
             <svg class="arch-svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid meet">
               <defs>
                 <linearGradient id="grad-idle" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -1483,6 +1493,45 @@
             </svg>
           </div>
 
+          <div class="arch-mobile-diagram" aria-label="Index lifecycle state machine">
+            <div class="arch-mobile-node">
+              <strong>not_indexed</strong>
+              <small>No active Publication yet.</small>
+            </div>
+            <div class="arch-mobile-link"><span>manage_index(create)</span></div>
+            <div class="arch-mobile-node" data-tone="runtime">
+              <strong>indexing</strong>
+              <small>Build the next Publication off to the side.</small>
+            </div>
+            <div class="arch-mobile-link"><span>result</span></div>
+            <div class="arch-mobile-outcomes">
+              <div class="arch-mobile-node" data-tone="success">
+                <strong>ready</strong>
+                <small>Successful Publication activation.</small>
+              </div>
+              <div class="arch-mobile-node" data-tone="danger">
+                <strong>failed</strong>
+                <small>Index build failed; current authority is not replaced.</small>
+              </div>
+            </div>
+            <div class="arch-mobile-link"><span>manage_index(sync)</span></div>
+            <div class="arch-mobile-node" data-tone="success">
+              <strong>sync_completed</strong>
+              <small>Current Publication refreshed successfully.</small>
+            </div>
+            <div class="arch-mobile-link"><span>fingerprint mismatch</span></div>
+            <div class="arch-mobile-node" data-tone="warning">
+              <strong>requires_reindex</strong>
+              <small>Runtime/index contract changed; rebuild before serving as current.</small>
+            </div>
+            <div class="arch-mobile-link"><span>manage_index(reindex)</span></div>
+            <div class="arch-mobile-node" data-tone="runtime">
+              <strong>indexing</strong>
+              <small>Re-enter the build path with the new fingerprint.</small>
+            </div>
+            <div class="arch-mobile-reset">manage_index(clear) from any state → not_indexed</div>
+          </div>
+
         </div>
         <div class="grid-2">
           <article class="card">
@@ -1522,7 +1571,7 @@
             <p>
               Freshness gate -> operator parse -> dense/BM25 retrieval ->
               deterministic filters -> rerank policy -> owner-symbol grouping
-              -> stable tie-breaks.
+              -> bounded evidence -> stable tie-breaks.
             </p>
           </article>
           <article class="card">
@@ -1534,10 +1583,12 @@
             </p>
           </article>
           <article class="card">
-            <h3>Hybrid Retrieval</h3>
+            <h3>Hybrid Retrieval + Reranking</h3>
             <p>
-              Dense vector hits and BM25 sparse keyword hits merge through
-              reciprocal rank fusion, so concepts and exact tokens both count.
+              Dense and BM25 hits merge through reciprocal rank fusion, then LateOn
+              reranks a bounded candidate set. Exploratory six-repo tuning reached
+              <strong>0.5046 MRR</strong> versus 0.2900 without reranking across 36
+              owner-discovery tasks; that is tuning evidence, not a held-out guarantee.
             </p>
           </article>
           <article class="card">
@@ -1559,10 +1610,11 @@
             </p>
           </article>
           <article class="card">
-            <h3>AST-Aware Chunks</h3>
+            <h3>AST-Derived Code Intelligence</h3>
             <p>
-              Supported languages split around real code structure, so retrieval
-              is less likely to cut through function or class boundaries.
+              OXC, Tree-sitter, and qualified semantic backends produce symbols,
+              structural evidence, exact spans, ownership, and relationship inputs.
+              MCP clients get useful code intelligence rather than a raw parser dump.
             </p>
           </article>
           <article class="card">
@@ -1599,11 +1651,11 @@
             </p>
           </article>
           <article class="card">
-            <h3>Local Default</h3>
+            <h3>Offline After Install</h3>
             <p>
-              Fresh installs use Potion embeddings and LanceDB without an API key.
-              Advanced provider/storage overrides remain configuration choices;
-              the Publication contract is independent of that choice.
+              Potion + BM25 + LateOn + LanceDB is the managed Linux x64 / WSL2
+              path. Provisioning happens during install; the qualified offline
+              runtime is designed for zero Satori runtime network requests afterward.
             </p>
           </article>
           <article class="card">
@@ -1683,43 +1735,48 @@
 
       <footer class="footer">
         <div class="footer-col">
-          <img class="footer-brand-logo" src="logo-mark.svg" alt="Satori logo" width="39" height="40" />
-          <h5>Satori</h5>
-          <p>Fast local repository intelligence for coding agents before they edit.</p>
+          <a class="footer-brand-home" href="index.html" aria-label="Satori home">
+            <img class="footer-brand-logo" src="logo-mark.svg" alt="" aria-hidden="true" width="39" height="40" />
+            <span class="footer-heading">Satori</span>
+          </a>
+          <p>Symbol + AST-derived repository intelligence for MCP coding agents.</p>
         </div>
         <div class="footer-col">
-          <h5>Resources</h5>
+          <div class="footer-heading">Resources</div>
           <a href="index.html">Landing</a>
           <a href="docs/">Documentation</a>
           <a href="https://github.com/ham-zax/satori" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+          <a href="https://www.npmjs.com/package/@zokizuan/satori-cli" target="_blank" rel="noopener noreferrer">npm Package</a>
+          <a href="https://www.producthunt.com/products/satori-4" target="_blank" rel="noopener noreferrer">Product Hunt</a>
         </div>
         <div class="footer-col">
-          <h5>Contact</h5>
+          <div class="footer-heading">Contact</div>
           <a href="mailto:ahmed@hamza.my.id">ahmed@hamza.my.id</a>
           <a href="index.html#contact">Contact form</a>
           <p style="margin-top:0.5rem;">AGPL-3.0-only open source. Built by Hamza.</p>
         </div>
         <div class="footer-bottom">
           <span>&copy; 2026 Satori. AGPL-3.0-only.</span>
-          <span>This page describes behavior. If it's here, there should be a test for it.</span>
+          <span>Atomic Publications · local-first default · read-only source access.</span>
         </div>
       </footer>
     </div>
 
   <script>
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const scrollProgress = document.getElementById("scrollProgress");
     const backToTop = document.getElementById("backToTop");
     let scrollTicking = false;
 
     function updateScrollUI() {
       const scrollTop = window.scrollY;
-      const docHeight = document.documentElement.scrollHeight - window.innerHeight;
-      const pct = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
-      if (scrollProgress) scrollProgress.style.width = pct + "%";
       if (backToTop) {
-        if (scrollTop > 600) backToTop.classList.add("visible");
-        else backToTop.classList.remove("visible");
+        if (scrollTop > 600) {
+          backToTop.classList.add("visible");
+          backToTop.tabIndex = 0;
+        } else {
+          backToTop.classList.remove("visible");
+          backToTop.tabIndex = -1;
+        }
       }
       scrollTicking = false;
     }
@@ -1737,7 +1794,6 @@
       });
     }
 
-    updateScrollUI();
   </script>
   </body>
 </html>
