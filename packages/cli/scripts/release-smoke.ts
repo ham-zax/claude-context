@@ -388,7 +388,7 @@ function assertPackedCliLateOnAcquisition(packedCliRoot: string): void {
     }
     const storeSource = fs.readFileSync(storePath, "utf8");
     const policyMissing = !storeSource.includes("lateon_context_v5_d32_owner_default_v1");
-    const frozenDigestMissing = !storeSource.includes("ecf84e7bd10ecdcb6b44ac9e0ad86f1a34986e5ee607eceec5b5724dcd29ecd8");
+    const frozenDigestMissing = !storeSource.includes("04958f55784968a2a45c1499adc2fcb706dcd23e9813c8e8da7e3f31f43777f6");
     const installSource = fs.readFileSync(installPath, "utf8");
     const resolutionMissing = !installSource.includes("resolveVerifiedLateOnModel");
     if (policyMissing || frozenDigestMissing || resolutionMissing) {
@@ -569,7 +569,7 @@ async function main(): Promise<void> {
         const message = error instanceof Error ? error.message : String(error);
         const detail = error instanceof Error ? npmOutput(error) : "";
         console.error(`[release:smoke] ${message}${detail ? ` ${detail}` : ""}`);
-        process.exit(1);
+        process.exitCode = 1;
     } finally {
         fs.rmSync(smokePackDir, { recursive: true, force: true });
         fs.rmSync(smokeExecDir, { recursive: true, force: true });
