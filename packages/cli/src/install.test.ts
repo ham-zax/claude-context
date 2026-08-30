@@ -28,6 +28,7 @@ import {
 import { loadAcquisitionAuthority } from "./lateon-model-store.js";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const POTION_ASSETS_ROOT = path.resolve(PACKAGE_ROOT, "../mcp/assets/potion/linux-x64");
 const POSTFLIGHT_MCP_RUNTIME_FIXTURE = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     "test-fixtures",
@@ -277,6 +278,47 @@ function installRuntimePackageStub(
     };
 }
 
+function installRuntimePackageWithPreflightCore(
+    relativeEntry: string,
+    expectedSpecifier: string,
+    installedVersion: string,
+    installedCoreVersion: string,
+) {
+    const install = installRuntimePackageStub(
+        relativeEntry,
+        expectedSpecifier,
+        installedVersion,
+        installedCoreVersion,
+    );
+    return (command: string, args: string[]) => {
+        const result = install(command, args);
+        const runtimeRoot = args[args.indexOf("--prefix") + 1]!;
+        const corePackageRoot = path.join(runtimeRoot, "node_modules", "@zokizuan", "satori-core");
+        const packageJsonPath = path.join(corePackageRoot, "package.json");
+        const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as Record<string, unknown>;
+        packageJson.exports = {
+            ".": "./index.mjs",
+            "./package.json": "./package.json",
+        };
+        fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2), "utf8");
+        fs.writeFileSync(path.join(corePackageRoot, "index.mjs"), [
+            "export async function restoreVerifiedOwnerExecutableBit() {}",
+            "export const PotionEmbedding = { async create() { return { async close() {} }; } };",
+            "export async function resolveOllamaModelIdentity({ model }) {",
+            "  return {",
+            "    configuredModel: model,",
+            "    resolvedModel: `${model}:latest`,",
+            `    artifactDigest: ${JSON.stringify(`sha256:${"a".repeat(64)}`)},`,
+            "    artifactSize: 42,",
+            "    dimension: 768,",
+            "  };",
+            "}",
+            "",
+        ].join("\n"), "utf8");
+        return result;
+    };
+}
+
 test("Oxc native target resolution failure leaves no candidate runtime directory", async () => {
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-oxc-resolution-failure-"));
     const runtimeRoot = path.join(homeDir, ".satori", "mcp-runtime", "@zokizuan-satori-mcp@6.8.1");
@@ -421,6 +463,55 @@ function writeCorePackage(packageRoot: string, version: string): void {
         },
     }, null, 2), "utf8");
 }
+
+async function runOfflineUpgradeWithProductionPreflight(
+    homeDir: string,
+    embeddingProvider: "Potion" | "Ollama",
+): Promise<Readonly<Record<string, string>>> {
+    await installUpgradeSourceRuntime(homeDir, {
+        SATORI_RUNTIME_PROFILE: "offline",
+        VECTOR_STORE_PROVIDER: "LanceDB",
+        EMBEDDING_PROVIDER: embeddingProvider,
+        SATORI_RERANKER_PROVIDER: "none",
+        ...(embeddingProvider === "Ollama" ? { OLLAMA_MODEL: "nomic-embed-text" } : {}),
+    });
+
+    const result = await executeManagedRuntimeUpgrade(UPGRADE_TARGET, {
+        homeDir,
+        env: {},
+        platform: "linux",
+        architecture: "x64",
+        potionAssetsRoot: POTION_ASSETS_ROOT,
+        execFileSyncImpl: installRuntimePackageWithPreflightCore(
+            "dist/target-runtime.mjs",
+            UPGRADE_TARGET.mcpPackageSpecifier,
+            UPGRADE_TARGET.mcpVersion,
+            UPGRADE_TARGET.coreVersion,
+        ) as never,
+        preflightDependencies: {
+            probeLanceDb: async () => {},
+            probeCandidateRuntime: async () => {},
+        },
+    });
+
+    assert.equal(result.status, "upgraded");
+    return parseManagedLauncherDescriptor(readFile(launcherPath(homeDir))).managedEnv;
+}
+
+test("managed Potion upgrade uses the staged Core preflight verifier", async () => {
+    await withTempHome(async (homeDir) => {
+        const environment = await runOfflineUpgradeWithProductionPreflight(homeDir, "Potion");
+        assert.equal(environment.EMBEDDING_PROVIDER, "Potion");
+    });
+});
+
+test("managed Ollama upgrade uses the staged Core identity resolver", async () => {
+    await withTempHome(async (homeDir) => {
+        const environment = await runOfflineUpgradeWithProductionPreflight(homeDir, "Ollama");
+        assert.equal(environment.EMBEDDING_PROVIDER, "Ollama");
+        assert.equal(environment.OLLAMA_MODEL, "nomic-embed-text:latest");
+    });
+});
 
 test("install writes managed Codex config and concise global guidance without skills", async () => {
     await withTempHome(async (homeDir) => {

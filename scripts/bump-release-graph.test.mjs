@@ -9,6 +9,7 @@ import {
   runReleaseBump,
   defaultIsVersionPublishedImpl,
 } from './bump-release-graph.mjs';
+import { readLocalReleaseGraph } from './release-graph.mjs';
 import { createNpmChildEnvironment } from './npm-child-process.mjs';
 
 function createWorkspace(files) {
@@ -306,6 +307,23 @@ test('apply writes exact versions', async () => {
   assert.deepEqual(readJson(cwd, 'packages/cli/package.json').dependencies, {});
   assert.deepEqual(readJson(cwd, 'packages/cli/package.json').satoriManagedRuntime.mcp, '6.8.1');
   assert.deepEqual(readJson(cwd, 'packages/cli/package.json').satoriManagedRuntime.core, '3.7.0');
+});
+
+test('apply refreshes prepared CLI runtime targets without bumping its version', async () => {
+  const cwd = standardWorkspace();
+  const runner = recordedRunner({ manifestWritesServerJson: true });
+
+  await runReleaseBump(bumpOptions(cwd, {
+    argv: ['core', 'minor', '--apply'],
+    execFileSyncImpl: runner,
+    isVersionPublishedImpl: publishedSet(['core', 'mcp']),
+  }));
+
+  const cli = readJson(cwd, 'packages/cli/package.json');
+  assert.equal(cli.version, '1.9.0');
+  assert.equal(cli.satoriManagedRuntime.mcp, '6.8.1');
+  assert.equal(cli.satoriManagedRuntime.core, '3.7.0');
+  assert.doesNotThrow(() => readLocalReleaseGraph(cwd));
 });
 
 test('MCP bump regenerates server.json', async () => {

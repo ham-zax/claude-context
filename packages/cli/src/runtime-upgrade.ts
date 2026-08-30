@@ -37,7 +37,7 @@ import {
 } from "./managed-runtime-store.js";
 import {
     CORE_PACKAGE_NAME,
-    exactRuntimeLanceDbProbe,
+    exactRuntimePreflightDependencies,
     installManagedRuntimeCandidate,
     isPathWithin,
     prepareLauncherInstall,
@@ -293,9 +293,8 @@ export async function executeManagedRuntimeUpgrade(
             )
             : undefined;
         const preflightDependencies: InstallPreflightDependencies = {
+            ...exactRuntimePreflightDependencies(candidate.command),
             ...options.preflightDependencies,
-            probeLanceDb: options.preflightDependencies?.probeLanceDb
-                ?? exactRuntimeLanceDbProbe(candidate.command),
         };
         const preflight = await (options.preflightRunner ?? runInstallPreflight)({
             runtime: selection.runtime,

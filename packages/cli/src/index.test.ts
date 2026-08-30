@@ -607,6 +607,41 @@ test("runCli install updates config and emits a quiet human summary", async () =
     }
 });
 
+test("runCli LateOn retry preserves explicit offline install selections", async () => {
+    const homeDir = fs.mkdtempSync(path.join(PACKAGE_ROOT, ".tmp-install-retry-home-"));
+    const io = captureIo();
+
+    try {
+        const exitCode = await runCli([
+            "install",
+            "--runtime", "offline",
+            "--ollama-model", "nomic-embed-text",
+            "--reranker", "lateon",
+            "--client", "codex",
+            "--profile", "minimal",
+            "--install-guidance-hook",
+        ], {
+            writeStdout: io.writeStdout,
+            writeStderr: io.writeStderr,
+            env: { HOME: homeDir },
+            installabilityVerifier: () => "@zokizuan/satori-mcp@4.4.1",
+            installRuntimeCommand: fakeInstallRuntimeCommand(homeDir),
+            installLateOnAuthorityLoader: () => {
+                throw new Error("acquisition unavailable");
+            },
+        });
+
+        assert.equal(exitCode, 1);
+        assert.match(io.read().stderr, /LateOn D32 model preflight failed: acquisition unavailable/);
+        assert.match(
+            io.read().stderr,
+            /Retry: npx -y @zokizuan\/satori-cli@latest install --runtime offline --reranker lateon --client codex --ollama-model nomic-embed-text --profile minimal --install-guidance-hook/,
+        );
+    } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+});
+
 test("runCli rejects an empty automatic client selection before package verification", async () => {
     const homeDir = fs.mkdtempSync(path.join(PACKAGE_ROOT, ".tmp-empty-auto-install-home-"));
     const io = captureIo();

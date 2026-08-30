@@ -188,8 +188,12 @@ export function applyReleaseBump(options) {
   output('Applying release bump plan:');
   printBumpPlan(plan, output);
 
+  const runtimeTargetsChanged = plan.changed.some((entry) => entry.key === 'core' || entry.key === 'mcp');
+  const entriesToWrite = plan.entries.filter((entry) => (
+    entry.to !== entry.from || (entry.key === 'cli' && runtimeTargetsChanged)
+  ));
   const originals = new Map();
-  for (const entry of plan.changed) {
+  for (const entry of entriesToWrite) {
     const manifestPath = path.join(cwd, entry.directory, 'package.json');
     originals.set(manifestPath, fs.readFileSync(manifestPath, 'utf8'));
   }
@@ -198,7 +202,7 @@ export function applyReleaseBump(options) {
 
   try {
     const targetVersions = Object.fromEntries(plan.entries.map((entry) => [entry.key, entry.to]));
-    for (const entry of plan.changed) {
+    for (const entry of entriesToWrite) {
       const manifestPath = path.join(cwd, entry.directory, 'package.json');
       const manifest = JSON.parse(originals.get(manifestPath));
       manifest.version = entry.to;
@@ -216,7 +220,7 @@ export function applyReleaseBump(options) {
     }
     versionsCheckImpl();
     return Object.freeze({
-      written: Object.freeze(plan.changed.map((entry) => entry.key)),
+      written: Object.freeze(entriesToWrite.map((entry) => entry.key)),
       serverJsonRegenerated: plan.mcpChanged,
     });
   } catch (error) {

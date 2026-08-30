@@ -688,7 +688,13 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
                 lateOnAuthorityLoader: options.installLateOnAuthorityLoader,
                 lateOnProgress: wantsJson ? undefined : createLateOnProgressReporter(writers),
                 lateOnRetryCommand: parsed.command.kind === "install" && parsed.command.runtime === "offline"
-                    ? satoriCliCommand(`install --runtime offline --reranker lateon --client ${parsed.command.client}`)
+                    ? satoriCliCommand([
+                        "install --runtime offline --reranker lateon",
+                        `--client ${parsed.command.client}`,
+                        ...(parsed.command.ollamaModel ? [`--ollama-model ${parsed.command.ollamaModel}`] : []),
+                        ...(parsed.command.profile ? [`--profile ${parsed.command.profile}`] : []),
+                        ...(parsed.command.installGuidanceHook ? ["--install-guidance-hook"] : []),
+                    ].join(" "))
                     : undefined,
             });
             if (parsed.command.kind === "install" && !parsed.command.dryRun) {
