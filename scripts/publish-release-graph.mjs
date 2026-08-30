@@ -4,7 +4,7 @@ import process from 'node:process';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { RELEASE_ORDER, RELEASE_PACKAGES } from './release-graph.mjs';
-import { createNpmChildEnvironment } from './npm-child-process.mjs';
+import { createNpmChildEnvironment, REGISTRY_PROBE_STDIO } from './npm-child-process.mjs';
 import { qualifyReleaseCandidate } from './qualify-release-candidate.mjs';
 import {
   PRODUCTION_NPM_REGISTRY,
@@ -46,6 +46,49 @@ function isPathWithin(rootPath, candidatePath) {
 
 function formatEntries(entries) {
   return entries.map((entry) => `${entry.name}@${entry.version}`).join(', ') || 'none';
+}
+
+export function ensureNpmAuthenticated(options = {}) {
+  const cwd = options.cwd || process.cwd();
+  const log = options.log || ((line) => console.log(line));
+  const execFileSyncImpl = options.execFileSyncImpl || execFileSync;
+  const env = createNpmChildEnvironment(process.env);
+  const whoami = () => execFileSyncImpl(
+    'npm',
+    ['whoami', '--registry', PRODUCTION_NPM_REGISTRY],
+    { cwd, env, stdio: REGISTRY_PROBE_STDIO, encoding: 'utf8' },
+  );
+
+  try {
+    return String(whoami()).trim();
+  } catch (error) {
+    if (classifyRegistryError(error) !== 'auth') {
+      throw new Error(
+        `Cannot verify npm authentication against ${PRODUCTION_NPM_REGISTRY}: ${errorMessage(error)}`,
+      );
+    }
+  }
+
+  log(`npm is not authenticated to ${PRODUCTION_NPM_REGISTRY}. Opening npm web login...`);
+  try {
+    execFileSyncImpl(
+      'npm',
+      ['login', '--auth-type=web', '--registry', PRODUCTION_NPM_REGISTRY],
+      { cwd, env, stdio: 'inherit' },
+    );
+  } catch (error) {
+    throw new Error(`npm web login did not complete successfully: ${errorMessage(error)}`);
+  }
+
+  try {
+    const username = String(whoami()).trim();
+    log(username ? `Authenticated to npm as ${username}.` : 'npm authentication verified.');
+    return username;
+  } catch (error) {
+    throw new Error(
+      `npm web login completed, but authentication could not be verified against ${PRODUCTION_NPM_REGISTRY}: ${errorMessage(error)}`,
+    );
+  }
 }
 
 export function assertSourceAuthority(options) {
@@ -186,6 +229,10 @@ export async function publishReleaseGraph(options = {}) {
       gitStatusImpl,
     }));
   const registryClient = options.registryClient || createReleaseRegistryClient({ cwd, execFileSyncImpl });
+  const authenticateImpl = options.authenticateImpl
+    || (options.publishImpl
+      ? null
+      : () => ensureNpmAuthenticated({ cwd, log, execFileSyncImpl }));
   const publishImpl = options.publishImpl
     || ((packageName, version, tarballPath) => {
       if (typeof tarballPath !== 'string') {
@@ -239,6 +286,7 @@ export async function publishReleaseGraph(options = {}) {
     canonicalMasterIsAncestorImpl,
   };
   assertSourceAuthority(sourceAuthorityOptions);
+  authenticateImpl?.();
   let report = null;
   const publisherTempRoot = fs.mkdtempSync(path.join(options.tempRoot || os.tmpdir(), 'satori-publish-'));
   try {
