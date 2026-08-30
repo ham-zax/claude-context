@@ -312,7 +312,7 @@ const buildSearchSchema = (ctx: ToolContext) => z.object({
 export const searchCodebaseTool: McpTool = {
     name: "search_codebase",
     description: () =>
-        "Hybrid repository search for unfamiliar behavior, ownership, symbols, configuration, or related implementation. It can combine exact/lexical and semantic evidence, defaults to implementation-first scope=\"runtime\", and grouped results expose canonical targets, bounded source previews, freshness/readiness, graph navigation state, and recommendedNextAction. Query prefixes support lang:, path:, -path:, must:, and exclude:. Recall is bounded, not exhaustive. Follow recommendedNextAction; use continue_search only when a continuation is returned.",
+        "Hybrid repository search for unfamiliar behavior, ownership, symbols, configuration, or related implementation. It combines exact/lexical and semantic evidence with a runtime-first scope=\"runtime\" default. Query prefixes support lang:, path:, -path:, must:, and exclude:. Recall is bounded, not exhaustive. Grouped results expose canonical targets, bounded source previews, freshness/readiness, graph navigation state, recommendedNextAction, and recovery hints. Use .satoriignore plus manage_index sync to remove persistent indexed noise. Use debugMode=summary|ranking|freshness|full for bounded diagnostics. Follow recommendedNextAction; use continue_search only when a continuation is returned.",
     inputSchemaZod: (ctx: ToolContext) => buildSearchSchema(ctx),
     execute: async (args: unknown, ctx: ToolContext) => {
         const schema = buildSearchSchema(ctx);

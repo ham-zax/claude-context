@@ -47,7 +47,7 @@ const manageIndexInputSchema = z.object({
 export const manageIndexTool: McpTool = {
     name: "manage_index",
     description: () =>
-        "Manage the current Satori Publication for a codebase: create, sync, status, reindex, or clear. Use sync for ordinary source or ignore-rule changes; use reindex only when the current Publication is missing, incompatible, or unprovable. create/reindex return after kickoff, so use status to observe progress and capabilities. Successful sync returns structured syncStats. Status detail=capabilities/diagnostics/full exposes language support, compatibility, and runtime-owner evidence.",
+        "Manage index lifecycle operations (create/reindex/sync/status/clear) for the current Satori Publication. Ignore-rule edits in repo-root .satoriignore/.gitignore reconcile automatically in the normal sync path. Use sync for ordinary source or ignore-rule changes; use reindex when the current Publication is incompatible, missing, or unprovable. Successful sync responses include syncStats with added, removed, and modified counts. create/reindex return after kickoff; use status to observe progress and capabilities. Mutation responses may include a process-lifetime `operation` projection; it is not persisted as operation history. After process restart, status derives indexed state from the current Publication and may omit `operation`. Terminal phases are `completed`, `failed`, and `blocked`. Status detail=capabilities/diagnostics/full exposes language support, compatibility, and runtime-owner evidence.",
     inputSchemaZod: () => manageIndexInputSchema,
     execute: async (args: unknown, ctx: ToolContext) => {
         const parsed = manageIndexInputSchema.safeParse(args || {});
