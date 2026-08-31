@@ -6,7 +6,14 @@ The CLI installs one managed MCP runtime, writes a stable launcher under `~/.sat
 
 ## Quick Start
 
-Offline on Linux x64 or Windows through WSL2:
+Offline on Linux x64 or Windows through WSL2, no global install required:
+
+```bash
+npx -y @zokizuan/satori-cli@latest install
+npx -y @zokizuan/satori-cli@latest doctor
+```
+
+For a persistent `satori` command:
 
 ```bash
 npm install -g @zokizuan/satori-cli@latest
@@ -14,9 +21,9 @@ satori install
 satori doctor
 ```
 
-Running `satori install` (or using `--client auto`) detects the supported
-Codex, Claude Code, and OpenCode clients from their documented local markers
-or CLI executables. Use `--client all` to force configuration of all three.
+`install` auto-detects supported Codex, Claude Code, and OpenCode clients from
+their documented local markers or CLI executables. `--client auto` is the
+explicit equivalent; use `--client all` to force configuration of all three.
 If no supported client is detected, Satori stops before runtime installation and
 shows explicit client commands. `satori uninstall` defaults to all supported
 clients; use `--client auto` to limit cleanup to currently detected clients.
@@ -50,7 +57,7 @@ satori doctor
 
 Restart the MCP client after installation.
 
-Use `satori upgrade` to update the globally installed CLI, then stage and activate that release's exact MCP and Core versions. The CLI update happens first. If MCP/Core verification fails, the updated CLI remains installed and the managed launcher is left unchanged; correct the reported problem and run the command again. `satori update` is an alias. Client configuration, indexes, hooks, and repository profiles are not rewritten.
+Use `satori upgrade` to update the globally installed CLI, then stage and activate that release's exact MCP and Core versions. `satori update` is an exact alias. Without a global CLI, use `npx -y @zokizuan/satori-cli@latest upgrade`. The CLI update happens first. If MCP/Core verification fails, the updated CLI remains installed and the managed launcher is left unchanged; correct the reported problem and run the command again. Client configuration, indexes, hooks, and repository profiles are not rewritten.
 
 The command reports progress before each potentially slow phase:
 

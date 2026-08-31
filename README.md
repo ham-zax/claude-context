@@ -41,7 +41,15 @@ Requirements: Node.js 22.13+, Linux x64 (native Linux or WSL2), and at least
 2 GiB of available runtime capacity for the qualified native deployment
 envelope. The capacity figure is an allowance, not measured steady
 consumption.
-The npm package installs the `satori` command.
+The recommended first run needs no global install:
+
+```bash
+npx -y @zokizuan/satori-cli@latest install
+npx -y @zokizuan/satori-cli@latest doctor
+```
+
+For a persistent `satori` command, install the lightweight CLI globally and use
+the same flow without the `npx` prefix:
 
 ```bash
 npm install -g @zokizuan/satori-cli@latest
@@ -49,9 +57,9 @@ satori install
 satori doctor
 ```
 
-Running `satori install` (or using `--client auto`) detects the supported
-Codex, Claude Code, and OpenCode clients from their documented local markers
-or CLI executables. Use `--client all` to force configuration of all three.
+`install` auto-detects supported Codex, Claude Code, and OpenCode clients from
+their documented local markers or CLI executables. `--client auto` is the
+explicit equivalent; use `--client all` to force configuration of all three.
 If no supported client is detected, Satori stops before runtime installation and
 shows explicit client commands. `satori uninstall` defaults to all supported
 clients; use `--client auto` to limit cleanup to currently detected clients.
@@ -97,6 +105,13 @@ Upgrade the installed CLI, MCP runtime, and its compatible Core dependency:
 satori upgrade
 ```
 
+`satori update` is an exact alias for `satori upgrade`. If you do not keep the
+CLI installed globally, run the same release flow through the latest CLI:
+
+```bash
+npx -y @zokizuan/satori-cli@latest upgrade
+```
+
 Satori reports each potentially slow phase as it works:
 
 ```text
@@ -110,7 +125,7 @@ The CLI is updated first. Satori then stages and verifies the exact MCP/Core run
 
 An upgrade follows one coordinated release closure declared by the latest CLI package. It does not independently combine the newest CLI, MCP, and Core versions. This keeps every activated runtime on an exact, tested MCP/Core pairing.
 
-For a no-install invocation, replace `satori` with `npx -y @zokizuan/satori-cli@latest`.
+For other no-install commands, replace `satori` with `npx -y @zokizuan/satori-cli@latest`.
 
 ```text
 plain-English question
@@ -344,12 +359,7 @@ VOYAGEAI_API_KEY
 SATORI_RERANKER_PROVIDER
 SATORI_LATEON_MODEL_PATH
 SATORI_LATEON_PROFILE
-SATORI_LATEON_REQUEST_DEADLINE_MS
-SATORI_LATEON_MAX_QUEUE_WAIT_MS
-SATORI_LATEON_RERANKER_STAGE_DEADLINE_MS
-SATORI_LATEON_MAX_ACTIVE_RERANKS
-SATORI_LATEON_MAX_QUEUED_RERANKS
-SATORI_LATEON_INTRA_OP_THREADS
+SATORI_LATEON_ACTIVATION_POLICY
 MILVUS_ADDRESS
 MILVUS_TOKEN
 ```
@@ -365,15 +375,15 @@ Incremental synchronization scans for source changes, embeds changed chunks only
 ## Offline Local Reranking
 
 Offline install defaults to reranking eligible candidates with the Apache-2.0
-`lightonai/LateOn-Code-edge` FP32 ONNX checkpoint at projection-v4 depth 32.
-D32 is operationally qualified but not held-out qualified; it became the
-managed offline default through an explicit owner activation decision scoped to
-Linux x64/WSL2 managed offline installations. Model weights are not bundled in
+`lightonai/LateOn-Code-edge` FP32 ONNX checkpoint under the managed v5 D32
+profile. Its semantic rerank projection remains projection-v4; v5 pins the
+model, artifacts, projection, candidate depth, and sequential CPU execution
+semantics without encoding machine-speed assumptions such as queue wait,
+scoring latency, or a fixed CPU thread count. Model weights are not bundled in
 each versioned MCP runtime. The CLI downloads the roughly 72 MB pinned closure
 once into `~/.satori/models/`, verifies every artifact, and reuses it across
-upgrades. `satori upgrade` migrates previous managed combinations (context-v3
-activated profile or the historical v3 rollout) to the context-v4 default
-atomically. Disable neural reranking explicitly with:
+upgrades. `satori upgrade` migrates previous managed LateOn combinations to the
+v5 default atomically. Disable neural reranking explicitly with:
 
 ```bash
 satori install --runtime offline --reranker none
@@ -393,26 +403,19 @@ SATORI_RERANKER_PROVIDER=lateon
 SATORI_LATEON_MODEL_PATH=/absolute/path/to/LateOn-Code-edge
 ```
 
-The default profile is:
+The current managed profile is:
 
 ```text
-SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v4_d32_v1
-SATORI_LATEON_ACTIVATION_POLICY=lateon_context_v4_d32_owner_default_v1
+SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v5_d32_v1
+SATORI_LATEON_ACTIVATION_POLICY=lateon_context_v5_d32_owner_default_v1
 ```
 
-Explicit D16, projection-v2, and projection-v3 D32 choices remain available for
-compatible developer configurations (the v3 activated combination is admitted
-and migrated to the v4 default by `satori upgrade`):
-
-```text
-SATORI_LATEON_PROFILE=lateon_projection_v1_d16_legacy
-SATORI_LATEON_PROFILE=lateon_projection_v2_d16_v1
-SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v2_d32_v2
-```
-
-D16 and D32 are distinct identity-bearing profiles. Satori never switches
-between them automatically; an unavailable, overloaded, timed-out, cancelled,
-or invalid neural run restores the deterministic baseline order.
+Older LateOn profile IDs are recognized only for migration guidance and cannot
+execute. `satori upgrade` migrates managed installations to v5. One local
+LateOn worker serves overlapping searches through a FIFO queue instead of
+falling back merely because another search is already reranking. Cancellation,
+a genuine worker/output failure, or the hard safety ceiling restores the
+frozen baseline retrieval order for that request.
 
 Projection-v4 rerank context sends the exact question once plus a
 positive-only answer-type line (the implementation focus never names

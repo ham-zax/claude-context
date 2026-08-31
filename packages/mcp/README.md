@@ -7,12 +7,15 @@ Most users should install Satori through `@zokizuan/satori-cli`. The installer w
 ## Install
 
 ```bash
-npm install -g @zokizuan/satori-cli@latest
-satori install --client all
-satori doctor
+npx -y @zokizuan/satori-cli@latest install
+npx -y @zokizuan/satori-cli@latest doctor
 ```
 
-The local Potion runtime currently supports Linux x64, including Windows through WSL2. Connected Voyage and explicit local Ollama configurations are also available. See the [main README](https://github.com/ham-zax/satori#quick-start) for runtime choices.
+`install` auto-detects supported clients; use `--client all` only when you want
+to force configuration of all three. A persistent `satori` command is optional:
+`npm install -g @zokizuan/satori-cli@latest`.
+
+The local Potion runtime currently supports Linux x64, including Windows through WSL2. Connected Voyage and explicit local Ollama configurations are also available. See the [main README](https://github.com/ham-zax/satori#install) for runtime choices.
 
 When installed through the CLI, compatible offline Potion + LanceDB clients
 share one private local host, provider/LanceDB state, and one Potion worker. Each

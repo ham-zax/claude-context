@@ -662,9 +662,10 @@
         <div class="callout">
           <p>
             Recommended public setup:
-            <code>npx -y @zokizuan/satori-cli@latest install --client all</code>,
-            then
+            <code>npx -y @zokizuan/satori-cli@latest install</code>, then
             <code>npx -y @zokizuan/satori-cli@latest doctor</code>.
+            No global install is required. The installer auto-detects supported
+            clients; use <code>--client all</code> only to force all three.
             Restart the MCP client after install.
           </p>
         </div>
@@ -750,8 +751,8 @@ npx -y @zokizuan/satori-cli@latest doctor</code></pre>
           <p>
             This updates the globally installed CLI, then stages and verifies
             that release's exact MCP and Core runtime before switching the
-            stable launcher. Restart running coding agents after a successful
-            runtime upgrade.
+            stable launcher. <code>satori update</code> is an exact alias.
+            Restart running coding agents after a successful runtime upgrade.
           </p>
           <p>
             If you did not install the CLI globally, run
