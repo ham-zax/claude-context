@@ -104,6 +104,8 @@ export class ToolResponseBuilders {
             syncStats?: ManageIndexResponseEnvelope["syncStats"];
             operation?: ManageIndexResponseEnvelope["operation"];
             publication?: ManageIndexResponseEnvelope["publication"];
+            sourceFreshness?: ManageIndexResponseEnvelope["sourceFreshness"];
+            pendingSync?: ManageIndexResponseEnvelope["pendingSync"];
         } = {},
     ): ManageIndexResponseEnvelope {
         const envelope: ManageIndexResponseEnvelope = {
@@ -152,6 +154,12 @@ export class ToolResponseBuilders {
         if (options.publication) {
             envelope.publication = options.publication;
         }
+        if (options.sourceFreshness) {
+            envelope.sourceFreshness = options.sourceFreshness;
+        }
+        if (options.pendingSync) {
+            envelope.pendingSync = options.pendingSync;
+        }
         return envelope;
     }
 
@@ -183,6 +191,9 @@ export class ToolResponseBuilders {
             languageCapabilities?: ManageIndexResponseEnvelope["languageCapabilities"];
             syncStats?: ManageIndexResponseEnvelope["syncStats"];
             operation?: ManageIndexResponseEnvelope["operation"];
+            publication?: ManageIndexResponseEnvelope["publication"];
+            sourceFreshness?: ManageIndexResponseEnvelope["sourceFreshness"];
+            pendingSync?: ManageIndexResponseEnvelope["pendingSync"];
         } = {},
     ): { content: Array<{ type: "text"; text: string }> } {
         return this.manageResponseFromEnvelope(

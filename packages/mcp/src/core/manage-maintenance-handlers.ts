@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { fileURLToPath } from "node:url";
 import {
     COLLECTION_LIMIT_MESSAGE,
     RemoteCollectionDeletePendingError,
@@ -14,8 +15,7 @@ import {
     type SymbolQualitySummary,
 } from "@zokizuan/satori-core";
 import {
-    SyncOperationError,
-    type PreparedReadObservationUnavailableReason,
+    type SourceFreshnessAssessment,
     type SyncManager,
 } from "./sync.js";
 import type {
@@ -30,13 +30,15 @@ import {
 } from "./backend-diagnostics.js";
 import { requireAbsoluteFilesystemPath } from "../utils.js";
 import {
-    MANUAL_SYNC_FRESHNESS_THRESHOLD_MS,
-} from "../config.js";
+    MutationWorkerCancelledError,
+    spawnSupervisedMutationWorker,
+} from "../server/mutation-worker-supervisor.js";
 import type {
     ManageIndexAction,
     ManageIndexReason,
     ManageIndexStatus,
     ManageIndexStatusDetail,
+    ManagePendingSync,
 } from "./manage-types.js";
 import {
     formatRuntimeOwnersStatusLine,
@@ -49,6 +51,7 @@ import {
     formatRootMutationBlockedMessage,
     type MutationOperationPhase,
     type RootMutationActivity,
+    type RootMutationExecution,
     type RootMutationOperation,
 } from "@zokizuan/satori-core/integration";
 
@@ -62,10 +65,7 @@ type ToolTextResponse = {
 type ManageMaintenanceHandlersHost = {
     context: Pick<Context, "clearIndex" | "getCurrentPublication" | "listCurrentPublications" | "inspectSourceFreshnessCheckpoint">;
     mutationRuntime: RootMutationRuntime;
-    syncManager: Pick<SyncManager, "ensureFreshness"> & Partial<Pick<
-        SyncManager,
-        "getPreparedReadObservation" | "getPreparedReadDiagnostics"
-    >>;
+    syncManager: Pick<SyncManager, "assessReadFreshness">;
     trackedRootReadiness: Pick<
         TrackedRootReadiness,
         "buildMissingLocalCollectionMessage"
@@ -105,7 +105,6 @@ type ManageMaintenanceHandlersHost = {
     buildStaleLocalHint(codebasePath: string, reason: string): Record<string, unknown>;
     buildStaleLocalMessage(codebasePath: string, requestedPath: string, reason: string): string;
     buildReindexHint(codebasePath: string): Record<string, unknown>;
-    touchWatchedCodebase(codebasePath: string): Promise<void>;
     manageVectorBackendResponse(
         action: string,
         path: string,
@@ -193,21 +192,59 @@ function formatUnknownError(error: unknown): string {
 }
 
 function formatActiveMutationStatusLine(activity: RootMutationActivity): string {
-    return `Active mutation: ${activity.action} operation=${activity.id} generation=${activity.generation} pid=${activity.pid} acquiredAt=${activity.acceptedAt}`;
+    const executor = activity.executorPid !== undefined
+        ? ` executorPid=${activity.executorPid}${activity.executorProcessGroupId !== undefined ? ` executorProcessGroupId=${activity.executorProcessGroupId}` : ""}`
+        : "";
+    return `Active mutation: ${activity.action} operation=${activity.id} generation=${activity.generation} pid=${activity.pid}${executor} acquiredAt=${activity.acceptedAt}`;
 }
 
-const SOURCE_STATE_UNVERIFIED_REASONS = new Set<PreparedReadObservationUnavailableReason>([
-    "watcher_manager_not_started",
-    "root_not_registered",
-    "watcher_starting",
-    "root_watcher_not_active",
-    "watcher_failed",
-    "watcher_event_pending",
-    "watcher_observation_gap",
-    "source_observation_failed",
-    "checkpoint_unverified",
-    "checkpoint_observation_mismatch",
+// Sync emits real progress per changed file and after measured Publication phases.
+// This is a quiet-window deadline, not a total-runtime ceiling; heartbeats do not reset it.
+const SYNC_NO_PROGRESS_TIMEOUT_MS = 30 * 60 * 1000;
+const TERMINAL_OPERATION_PHASES = new Set<MutationOperationPhase>([
+    "completed",
+    "failed",
+    "blocked",
+    "cancelled",
 ]);
+
+function resolveMutationSyncWorkerPath(): string {
+    const built = fileURLToPath(new URL("../server/mutation-sync-worker.js", import.meta.url));
+    if (fs.existsSync(built)) return built;
+    return fileURLToPath(new URL("../server/mutation-sync-worker.ts", import.meta.url));
+}
+
+function pendingSyncProjection(
+    operation: RootMutationOperation | undefined,
+    activity: RootMutationActivity | undefined,
+): ManagePendingSync | undefined {
+    if (!operation || operation.action !== "sync") return undefined;
+    return {
+        operationId: operation.id,
+        generation: operation.generation,
+        phase: operation.phase,
+        ...(operation.progress !== undefined ? { progress: operation.progress } : {}),
+        ...(operation.heartbeatAt ? { heartbeatAt: operation.heartbeatAt } : {}),
+        ...(operation.progressAt ? { progressAt: operation.progressAt } : {}),
+        ...(operation.cancelRequestedAt ? { cancelRequestedAt: operation.cancelRequestedAt } : {}),
+        ...(operation.cancelReason ? { cancelReason: operation.cancelReason } : {}),
+        ...(activity?.executorPid !== undefined ? { executorPid: activity.executorPid } : {}),
+        ...(activity?.executorProcessGroupId !== undefined
+            ? { executorProcessGroupId: activity.executorProcessGroupId }
+            : {}),
+    };
+}
+
+function sourceFreshnessLine(sourceFreshness: SourceFreshnessAssessment): string {
+    switch (sourceFreshness.state) {
+        case "verified":
+            return `Current source parity is verified (${sourceFreshness.reason}).`;
+        case "changed":
+            return `Current source differs from this completed Publication (${sourceFreshness.reason}); the published generation remains readable while maintenance is pending.`;
+        case "unverified":
+            return `Current source parity is unverified (${sourceFreshness.reason}); the completed Publication remains readable and can be refreshed explicitly when current-source parity matters.`;
+    }
+}
 
 export class ManageMaintenanceHandlers {
     constructor(private readonly host: ManageMaintenanceHandlersHost) {}
@@ -353,29 +390,14 @@ export class ManageMaintenanceHandlers {
                 return this.host.manageResponse("status", absolutePath, "error", `Error: Path '${absolutePath}' is not a directory`, { detail });
             }
 
-            const liveSyncMutation = this.host.mutationRuntime.getActiveMutation(absolutePath);
-            if (liveSyncMutation?.action === "sync") {
-                const matchingOperation = this.host.mutationRuntime.getOperation(absolutePath);
-                return this.host.manageResponse(
-                    "status",
-                    liveSyncMutation.canonicalRoot,
-                    "not_ready",
-                    `Codebase '${liveSyncMutation.canonicalRoot}' is being synchronized. ${formatActiveMutationStatusLine(liveSyncMutation)}`,
-                    {
-                        detail,
-                        reason: "indexing",
-                        hints: {
-                            status: this.host.buildStatusHint(liveSyncMutation.canonicalRoot),
-                            retryAfterMs: this.host.getManageRetryAfterMs(),
-                            indexing: this.host.buildIndexingMetadata(liveSyncMutation.canonicalRoot),
-                            activeMutation: liveSyncMutation,
-                        },
-                        ...(matchingOperation ? { operation: matchingOperation } : {}),
-                    },
-                );
-            }
-
-            const trackedRootState = await this.host.prepareStatusTrackedRootRead(absolutePath);
+            const liveMutation = this.host.mutationRuntime.getActiveMutation(absolutePath);
+            const preparedTrackedRootState = await this.host.prepareStatusTrackedRootRead(absolutePath);
+            const trackedRootState = preparedTrackedRootState.state === "indexing"
+                && liveMutation?.action === "sync"
+                && preparedTrackedRootState.searchableGenerationAvailable
+                && preparedTrackedRootState.searchableRead
+                ? preparedTrackedRootState.searchableRead
+                : preparedTrackedRootState;
             if (trackedRootState.state === "requires_reindex") {
                 const operation = this.host.mutationRuntime.getOperation(trackedRootState.codebasePath);
                 const statusMessage = this.host.buildReindexInstruction(trackedRootState.codebasePath, trackedRootState.message);
@@ -406,29 +428,22 @@ export class ManageMaintenanceHandlers {
 
             const sourceCheckpointEvidence = trackedRootState.state === "ready"
                 && trackedRootState.publication.publication.status === "complete"
-                ? await this.host.context.inspectSourceFreshnessCheckpoint(trackedRootState.root.path)
+                ? await this.host.context.inspectSourceFreshnessCheckpoint(
+                    trackedRootState.root.path,
+                    trackedRootState.publication,
+                )
                 : null;
-
-            let sourceObservationUnavailableReason: PreparedReadObservationUnavailableReason | undefined;
+            let sourceFreshness: SourceFreshnessAssessment | undefined;
             if (
                 trackedRootState.state === "ready"
                 && trackedRootState.publication.publication.status === "complete"
-                && typeof this.host.syncManager.getPreparedReadObservation === "function"
-                && typeof this.host.syncManager.getPreparedReadDiagnostics === "function"
             ) {
-                const watcherDiagnostics = this.host.syncManager.getPreparedReadDiagnostics(
+                const freshnessDecision = await this.host.syncManager.assessReadFreshness(
                     trackedRootState.root.path,
+                    0,
+                    { preparedPublication: trackedRootState.publication },
                 );
-                const sourceObservation = this.host.syncManager.getPreparedReadObservation(
-                    trackedRootState.root.path,
-                );
-                if (
-                    watcherDiagnostics.configured
-                    && !sourceObservation.available
-                    && SOURCE_STATE_UNVERIFIED_REASONS.has(sourceObservation.reason)
-                ) {
-                    sourceObservationUnavailableReason = sourceObservation.reason;
-                }
+                sourceFreshness = freshnessDecision.sourceFreshness;
             }
 
             let statusMessage = "";
@@ -522,23 +537,26 @@ export class ManageMaintenanceHandlers {
                 statusMessage += `\n🕐 Published: ${new Date(publication.createdAt).toLocaleString()}`;
             }
 
-            if (trackedRootState.state === "ready" && sourceObservationUnavailableReason) {
-                envelopePath = trackedRootState.root.path;
-                envelopeStatus = "not_ready";
-                envelopeReason = "source_state_unverified";
+            if (trackedRootState.state === "ready" && sourceFreshness) {
                 envelopeHints = {
                     ...(envelopeHints || {}),
-                    sync: this.host.buildSyncHint(trackedRootState.root.path),
                     sourceFreshness: {
-                        status: "unverified",
-                        reason: sourceObservationUnavailableReason,
-                        action: "Run manage_index sync to establish current-source authority for the current Publication.",
+                        status: sourceFreshness.state,
+                        reason: sourceFreshness.reason,
+                        ...(sourceFreshness.state !== "verified"
+                            ? { maintenance: this.host.buildSyncHint(trackedRootState.root.path) }
+                            : {}),
                     },
                 };
-                statusMessage = `⏳ Codebase '${trackedRootState.root.path}' has a completed Publication, but its current source state is unverified (${sourceObservationUnavailableReason}). Run manage_index with {"action":"sync","path":"${trackedRootState.root.path}"} before search or navigation.`;
+                statusMessage += `\n🔎 ${sourceFreshnessLine(sourceFreshness)}`;
             }
 
             const warnings: WarningCode[] = [];
+            if (sourceFreshness?.state === "changed") {
+                warnings.push(WARNING_CODES.SOURCE_CHANGES_PENDING);
+            } else if (sourceFreshness?.state === "unverified") {
+                warnings.push(WARNING_CODES.SOURCE_FRESHNESS_UNVERIFIED);
+            }
             if (proofDebugHint) {
                 statusMessage += `\n⚠️ Completion proof check is temporarily unavailable (probe_failed); keeping local status.`;
                 warnings.push(WARNING_CODES.IGNORE_POLICY_PROBE_FAILED);
@@ -666,6 +684,12 @@ export class ManageMaintenanceHandlers {
             }
 
             const operation = this.host.mutationRuntime.getOperation(envelopePath);
+            const pendingSync = activeMutation?.action === "sync"
+                ? pendingSyncProjection(operation, activeMutation)
+                : undefined;
+            if (pendingSync) {
+                statusMessage += `\n🔄 Background sync is pending: operation=${pendingSync.operationId} phase=${pendingSync.phase}${pendingSync.progress !== undefined ? ` progress=${pendingSync.progress}%` : ""}. The completed Publication above remains the readable generation until replacement activation.`;
+            }
             const publication = trackedRootState.state === "ready"
                 ? {
                     publicationId: trackedRootState.publication.id,
@@ -697,6 +721,8 @@ export class ManageMaintenanceHandlers {
                     ...(languageCapabilities ? { languageCapabilities } : {}),
                     ...(operation ? { operation } : {}),
                     ...(publication ? { publication } : {}),
+                    ...(sourceFreshness ? { sourceFreshness } : {}),
+                    ...(pendingSync ? { pendingSync } : {}),
                     ...(envelopeMessage ? { message: envelopeMessage } : {}),
                 },
             );
@@ -705,7 +731,10 @@ export class ManageMaintenanceHandlers {
         }
     }
 
-    public async handleSyncCodebase(args: ToolArgs): Promise<ToolTextResponse> {
+    public async handleSyncCodebase(
+        args: ToolArgs,
+        requestSignal?: AbortSignal,
+    ): Promise<ToolTextResponse> {
         const codebasePath = typeof args.path === "string" ? args.path : "";
         const absolutePathResult = requireAbsoluteFilesystemPath(codebasePath, "path");
         if (!absolutePathResult.ok) {
@@ -715,20 +744,15 @@ export class ManageMaintenanceHandlers {
 
         try {
             const absolutePath = requestedPath;
-
             if (!fs.existsSync(absolutePath)) {
                 return this.host.manageResponse("sync", absolutePath, "error", `Error: Path '${absolutePath}' does not exist. Original input: '${codebasePath}'`);
             }
-
-            const stat = fs.statSync(absolutePath);
-            if (!stat.isDirectory()) {
+            if (!fs.statSync(absolutePath).isDirectory()) {
                 return this.host.manageResponse("sync", absolutePath, "error", `Error: Path '${absolutePath}' is not a directory`);
             }
 
             const runtimeOwnerConflict = await this.host.buildRuntimeOwnerConflictResponseIfBlocked("sync", absolutePath);
-            if (runtimeOwnerConflict) {
-                return runtimeOwnerConflict;
-            }
+            if (runtimeOwnerConflict) return runtimeOwnerConflict;
 
             const currentPublication = this.host.context.getCurrentPublication(absolutePath);
             if (!currentPublication) {
@@ -736,12 +760,10 @@ export class ManageMaintenanceHandlers {
                     "sync",
                     absolutePath,
                     "not_indexed",
-                    `Error: Codebase '${absolutePath}' is not indexed. Call manage_index with {"action":"create","path":"${absolutePath}"} first.`,
+                    `Codebase '${absolutePath}' has no completed Publication to refresh.`,
                     {
                         reason: "not_indexed",
-                        hints: {
-                            create: this.host.buildCreateHint(absolutePath),
-                        },
+                        hints: { create: this.host.buildCreateHint(absolutePath) },
                     },
                 );
             }
@@ -750,189 +772,276 @@ export class ManageMaintenanceHandlers {
                     "sync",
                     absolutePath,
                     "requires_reindex",
-                    this.host.buildReindexInstruction(absolutePath, "The current Publication is partial; incremental sync requires a complete Publication baseline."),
-                    {
-                        reason: "requires_reindex",
-                        hints: {
-                            reindex: this.host.buildReindexHint(absolutePath),
-                            status: this.host.buildStatusHint(absolutePath),
-                        },
-                    },
-                );
-            }
-
-            console.log(`[SYNC] Manually triggering incremental sync for: ${absolutePath}`);
-            const decision = await this.host.syncManager.ensureFreshness(
-                absolutePath,
-                MANUAL_SYNC_FRESHNESS_THRESHOLD_MS,
-            );
-            const operationOptions = decision.operation ? { operation: decision.operation } : undefined;
-
-            if (decision.mode === "ignore_reload_failed") {
-                const fallbackLine = decision.fallbackSyncExecuted
-                    ? "\nFallback incremental sync was executed, but ignore-rule reconciliation did not complete deterministically."
-                    : "";
-                return this.host.manageResponse(
-                    "sync",
-                    absolutePath,
-                    "error",
-                    `Error syncing codebase: ignore-rule reconciliation failed (${decision.errorMessage || "unknown_ignore_reload_error"}).${fallbackLine}`,
-                    operationOptions,
-                );
-            }
-
-            if (decision.mode === "skipped_indexing") {
-                return this.host.manageResponse(
-                    "sync",
-                    absolutePath,
-                    "not_ready",
-                    this.host.buildManageActionBlockedMessage(absolutePath, "sync"),
-                    {
-                        reason: "indexing",
-                        hints: {
-                            status: this.host.buildStatusHint(absolutePath),
-                            retryAfterMs: this.host.getManageRetryAfterMs(),
-                            indexing: this.host.buildIndexingMetadata(absolutePath),
-                        },
-                    },
-                );
-            }
-
-            if (decision.mode === "skipped_mutation_in_progress") {
-                const activeMutation = decision.activeMutation;
-                return this.host.manageResponse(
-                    "sync",
-                    absolutePath,
-                    "blocked",
-                    activeMutation
-                        ? formatRootMutationBlockedMessage(activeMutation)
-                        : `Another mutation is already in progress for '${absolutePath}'. Use manage_index status to observe it.`,
-                    {
-                        reason: "mutation_in_progress",
-                        hints: {
-                            status: this.host.buildStatusHint(absolutePath),
-                            ...(activeMutation ? { activeMutation } : {}),
-                        },
-                    },
-                );
-            }
-
-            if (decision.mode === "skipped_requires_reindex") {
-                return this.host.manageResponse(
-                    "sync",
-                    absolutePath,
-                    "requires_reindex",
-                    this.host.buildReindexInstruction(absolutePath, "Sync blocked because this codebase requires reindex."),
-                    {
-                        reason: "requires_reindex",
-                        hints: {
-                            reindex: this.host.buildReindexHint(absolutePath),
-                            status: this.host.buildStatusHint(absolutePath),
-                        },
-                        ...(decision.operation ? { operation: decision.operation } : {}),
-                    },
-                );
-            }
-
-            if (decision.mode === "skipped_source_checkpoint_unavailable") {
-                return this.host.manageResponse(
-                    "sync",
-                    absolutePath,
-                    "requires_reindex",
                     this.host.buildReindexInstruction(
                         absolutePath,
-                        `Incremental sync is unavailable because its source checkpoint is ${decision.checkpointStatus || "unavailable"}.`,
+                        "The current Publication is partial; incremental sync requires a complete Publication baseline.",
                     ),
                     {
                         reason: "requires_reindex",
                         hints: {
                             reindex: this.host.buildReindexHint(absolutePath),
                             status: this.host.buildStatusHint(absolutePath),
-                            sourceFreshness: {
-                                status: decision.checkpointStatus || "unavailable",
-                                message: decision.errorMessage,
-                            },
                         },
                     },
                 );
             }
 
-            if (decision.mode === "skipped_missing_path") {
-                return this.host.manageResponse("sync", absolutePath, "error", `Error: Codebase path '${absolutePath}' no longer exists.`, operationOptions);
-            }
+            const mutation = this.host.mutationRuntime.start(
+                absolutePath,
+                "sync",
+                async (execution: RootMutationExecution) => {
+                    execution.update("preflight", { progress: 0 });
+                    let requestedTerminalPhase: "completed" | "blocked" | undefined;
+                    let requestedTerminalProgress: number | undefined;
+                    let boundActivity: RootMutationActivity | undefined;
+                    const worker = spawnSupervisedMutationWorker({
+                        operationId: execution.id,
+                        workerPath: resolveMutationSyncWorkerPath(),
+                        workerArgs: [JSON.stringify({ path: absolutePath })],
+                        signal: execution.signal,
+                        noProgressTimeoutMs: SYNC_NO_PROGRESS_TIMEOUT_MS,
+                        onHeartbeat: () => {
+                            const operation = this.host.mutationRuntime.getCurrentOperation(absolutePath);
+                            if (
+                                operation?.id === execution.id
+                                && !TERMINAL_OPERATION_PHASES.has(operation.phase)
+                            ) {
+                                execution.heartbeat();
+                            }
+                        },
+                        onProgress: (progress) => {
+                            if (progress.phase && TERMINAL_OPERATION_PHASES.has(progress.phase)) {
+                                if (progress.phase === "completed" || progress.phase === "blocked") {
+                                    requestedTerminalPhase = progress.phase;
+                                    requestedTerminalProgress = progress.progress;
+                                }
+                                return;
+                            }
+                            const operation = this.host.mutationRuntime.getCurrentOperation(absolutePath);
+                            if (
+                                !operation
+                                || operation.id !== execution.id
+                                || operation.phase === "cancelling"
+                                || TERMINAL_OPERATION_PHASES.has(operation.phase)
+                            ) {
+                                return;
+                            }
+                            execution.update(
+                                progress.phase ?? operation.phase,
+                                progress.progress !== undefined ? { progress: progress.progress } : {},
+                            );
+                        },
+                        onNoProgress: () => {
+                            this.host.mutationRuntime.requestCancellation(
+                                execution.id,
+                                "sync_no_progress_timeout",
+                            );
+                        },
+                    });
 
-            const added = decision.stats?.added ?? 0;
-            const removed = decision.stats?.removed ?? 0;
-            const modified = decision.stats?.modified ?? 0;
-            const syncStats = { added, removed, modified };
-            const ignoredDeletes = decision.deletedFiles ?? 0;
-            const totalChanges = added + removed + modified;
+                    try {
+                        await worker.ready;
+                        if (execution.signal.aborted) {
+                            throw execution.signal.reason ?? new Error("Sync cancelled before executor binding.");
+                        }
+                        boundActivity = execution.bindExecutor(worker.executor);
+                        worker.start();
+                    } catch (error) {
+                        worker.requestCancellation("sync_startup_failed");
+                        await worker.completion.catch(() => undefined);
+                        throw error;
+                    }
 
-            if (decision.mode === "coalesced") {
-                if (typeof decision.errorMessage === "string" && decision.errorMessage.trim().length > 0) {
-                    const fallbackLine = decision.fallbackSyncExecuted
-                        ? "\nFallback incremental sync was executed, but ignore-rule reconciliation did not complete deterministically."
-                        : "";
+                    const operation = this.host.mutationRuntime.getCurrentOperation(absolutePath);
+                    const publication = {
+                        publicationId: currentPublication.id,
+                        collectionName: currentPublication.publication.vector.collectionName,
+                        policyHash: currentPublication.publication.policy.policyHash,
+                    };
+                    const response = this.host.manageResponse(
+                        "sync",
+                        absolutePath,
+                        "ok",
+                        `Accepted background sync for '${absolutePath}'. The current completed Publication remains available to search and navigation while the replacement is prepared. Use manage_index status to observe operation '${execution.id}'.`,
+                        {
+                            hints: {
+                                status: this.host.buildStatusHint(absolutePath),
+                                cancel: {
+                                    tool: "manage_index",
+                                    args: {
+                                        action: "cancel",
+                                        path: absolutePath,
+                                        operationId: execution.id,
+                                    },
+                                },
+                            },
+                            ...(operation ? { operation } : {}),
+                            publication,
+                            pendingSync: pendingSyncProjection(operation, boundActivity),
+                        },
+                    );
+
+                    return {
+                        response,
+                        completion: (async () => {
+                            try {
+                                await worker.completion;
+                                if (!this.host.mutationRuntime.isCurrent(absolutePath)) return;
+
+                                const currentOperation = this.host.mutationRuntime.getCurrentOperation(absolutePath);
+                                if (
+                                    currentOperation?.id === execution.id
+                                    && currentOperation.phase !== "cancelling"
+                                    && !TERMINAL_OPERATION_PHASES.has(currentOperation.phase)
+                                ) {
+                                    execution.update(
+                                        requestedTerminalPhase ?? "completed",
+                                        requestedTerminalProgress !== undefined
+                                            ? { progress: requestedTerminalProgress }
+                                            : requestedTerminalPhase === "blocked"
+                                                ? {}
+                                                : { progress: 100 },
+                                    );
+                                }
+                            } catch (error) {
+                                if (this.host.mutationRuntime.isCurrent(absolutePath)) {
+                                    const currentOperation = this.host.mutationRuntime.getCurrentOperation(absolutePath);
+                                    if (
+                                        currentOperation?.id === execution.id
+                                        && !TERMINAL_OPERATION_PHASES.has(currentOperation.phase)
+                                    ) {
+                                        if (error instanceof MutationWorkerCancelledError) {
+                                            execution.update("cancelled");
+                                        } else {
+                                            execution.update("failed", { error: formatUnknownError(error) });
+                                        }
+                                    }
+                                }
+                                throw error;
+                            }
+                        })(),
+                    };
+                },
+                { signal: requestSignal },
+            );
+
+            void mutation.completion.catch((error: unknown) => {
+                console.error(`[SYNC] Detached supervised sync rejected for '${absolutePath}':`, error);
+            });
+            try {
+                return await mutation.started;
+            } catch (error) {
+                if (error instanceof RootMutationInProgressError) {
                     return this.host.manageResponse(
                         "sync",
                         absolutePath,
-                        "error",
-                        `Error syncing codebase: coalesced in-flight reconcile failed (${decision.errorMessage}).${fallbackLine}`,
-                        operationOptions,
+                        "blocked",
+                        formatRootMutationBlockedMessage(error.activeMutation),
+                        {
+                            reason: "mutation_in_progress",
+                            hints: {
+                                status: this.host.buildStatusHint(absolutePath),
+                                activeMutation: error.activeMutation,
+                            },
+                        },
                     );
                 }
-                await this.host.touchWatchedCodebase(absolutePath);
-                return this.host.manageResponse("sync", absolutePath, "ok", `🔄 Sync request coalesced for '${absolutePath}'. Reused in-flight sync result.`, {
-                    ...operationOptions,
-                    syncStats,
-                });
+                throw error;
             }
-
-            if (decision.mode === "reconciled_ignore_change") {
-                if (totalChanges === 0 && ignoredDeletes === 0) {
-                    await this.host.touchWatchedCodebase(absolutePath);
-                    return this.host.manageResponse("sync", absolutePath, "ok", `✅ Ignore-rule reconciliation completed for '${absolutePath}'. No additional index changes were required.`, {
-                        ...operationOptions,
-                        syncStats,
-                    });
-                }
-
-                const resultMessage =
-                    `🔄 Incremental sync + ignore-rule reconciliation completed for '${absolutePath}'.\n\n` +
-                    `📊 Sync changes:\n+ ${added} file(s) added\n- ${removed} file(s) removed\n~ ${modified} file(s) modified\n` +
-                    `🧹 Ignored paths removed from index: ${ignoredDeletes}\n` +
-                    `\nTotal changes: ${totalChanges + ignoredDeletes}`;
-                console.log(`[SYNC] ✅ Sync+ignore reconcile completed: +${added}, -${removed}, ~${modified}, ignoredDeleted=${ignoredDeletes}`);
-                await this.host.touchWatchedCodebase(absolutePath);
-                return this.host.manageResponse("sync", absolutePath, "ok", resultMessage, {
-                    ...operationOptions,
-                    syncStats,
-                });
-            }
-
-            if (totalChanges === 0) {
-                await this.host.touchWatchedCodebase(absolutePath);
-                return this.host.manageResponse("sync", absolutePath, "ok", `✅ No changes detected for codebase '${absolutePath}'. Index is up to date.`, {
-                    ...operationOptions,
-                    syncStats,
-                });
-            }
-
-            const resultMessage = `🔄 Incremental sync completed for '${absolutePath}'.\n\n📊 Changes:\n+ ${added} file(s) added\n- ${removed} file(s) removed\n~ ${modified} file(s) modified\n\nTotal changes: ${totalChanges}`;
-            console.log(`[SYNC] ✅ Sync completed: +${added}, -${removed}, ~${modified}`);
-            await this.host.touchWatchedCodebase(absolutePath);
-            return this.host.manageResponse("sync", absolutePath, "ok", resultMessage, {
-                ...operationOptions,
-                syncStats,
-            });
         } catch (error: unknown) {
-            console.error("[SYNC] Error during sync:", error);
-            const operation = error instanceof SyncOperationError ? error.operation : undefined;
+            console.error("[SYNC] Error starting supervised sync:", error);
             const vectorBackendDiagnostic = classifyVectorBackendError(error);
             if (vectorBackendDiagnostic) {
-                return this.host.manageVectorBackendResponse("sync", requestedPath, vectorBackendDiagnostic, undefined, operation);
+                return this.host.manageVectorBackendResponse("sync", requestedPath, vectorBackendDiagnostic);
             }
-            return this.host.manageResponse("sync", requestedPath, "error", `Error syncing codebase: ${formatUnknownError(error)}`, operation ? { operation } : undefined);
+            return this.host.manageResponse(
+                "sync",
+                requestedPath,
+                "error",
+                `Error starting sync: ${formatUnknownError(error)}`,
+            );
         }
+    }
+
+    public async handleCancelOperation(args: ToolArgs): Promise<ToolTextResponse> {
+        const codebasePath = typeof args.path === "string" ? args.path : "";
+        const operationId = typeof args.operationId === "string" ? args.operationId.trim() : "";
+        const absolutePathResult = requireAbsoluteFilesystemPath(codebasePath, "path");
+        if (!absolutePathResult.ok) {
+            return this.host.manageResponse("cancel", codebasePath, "error", absolutePathResult.message);
+        }
+        const absolutePath = absolutePathResult.absolutePath;
+        if (!operationId) {
+            return this.host.manageResponse(
+                "cancel",
+                absolutePath,
+                "error",
+                "operationId is required for exact cancellation.",
+            );
+        }
+
+        const activeMutation = this.host.mutationRuntime.getActiveMutation(absolutePath);
+        if (!activeMutation || activeMutation.id !== operationId) {
+            return this.host.manageResponse(
+                "cancel",
+                absolutePath,
+                "blocked",
+                `Operation '${operationId}' is not the live mutation for '${absolutePath}'. No cancellation was sent.`,
+                {
+                    reason: "operation_not_live",
+                    hints: {
+                        ...(activeMutation ? { activeMutation } : {}),
+                        status: this.host.buildStatusHint(absolutePath),
+                    },
+                },
+            );
+        }
+        if (activeMutation.action !== "sync") {
+            return this.host.manageResponse(
+                "cancel",
+                absolutePath,
+                "blocked",
+                `Operation '${operationId}' is a live '${activeMutation.action}' mutation, but only supervised sync operations are cancellable through this control plane.`,
+                {
+                    reason: "operation_not_cancellable",
+                    hints: { activeMutation },
+                },
+            );
+        }
+
+        const accepted = this.host.mutationRuntime.requestCancellation(
+            operationId,
+            "requested_by_manage_index",
+        );
+        if (!accepted) {
+            return this.host.manageResponse(
+                "cancel",
+                absolutePath,
+                "blocked",
+                `Operation '${operationId}' is no longer live. No cancellation was sent.`,
+                {
+                    reason: "operation_not_live",
+                    hints: { status: this.host.buildStatusHint(absolutePath) },
+                },
+            );
+        }
+
+        const operation = this.host.mutationRuntime.getOperation(absolutePath);
+        const currentActivity = this.host.mutationRuntime.getActiveMutation(absolutePath);
+        return this.host.manageResponse(
+            "cancel",
+            absolutePath,
+            "ok",
+            `Cancellation was requested for sync operation '${operationId}'. The writer lease remains held until the supervised executor process tree is proven quiescent.`,
+            {
+                reason: "cancellation_requested",
+                ...(operation ? { operation } : {}),
+                hints: {
+                    status: this.host.buildStatusHint(absolutePath),
+                    ...(currentActivity ? { activeMutation: currentActivity } : {}),
+                },
+                pendingSync: pendingSyncProjection(operation, currentActivity),
+            },
+        );
     }
 }

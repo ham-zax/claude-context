@@ -42,15 +42,13 @@ export type ResolvedVectorStoreConfig =
  *
  * BACKGROUND_SYNC_INITIAL_DELAY_MS — first background tick after embedding runtime starts.
  * BACKGROUND_SYNC_INTERVAL_MS — delay between background ticks (self-scheduling).
- * SEARCH_FRESHNESS_THRESHOLD_MS — search-path ensureFreshness max age for skipped_recent.
+ * SEARCH_FRESHNESS_THRESHOLD_MS — search-path read-only freshness assessment max age.
  * BACKGROUND_FRESHNESS_THRESHOLD_MS — background-path ensureFreshness max age.
- * MANUAL_SYNC_FRESHNESS_THRESHOLD_MS — manage_index sync force-check (0 = always compare).
  */
 export const BACKGROUND_SYNC_INITIAL_DELAY_MS = 5_000;
 export const BACKGROUND_SYNC_INTERVAL_MS = 3 * 60 * 1000;
 export const SEARCH_FRESHNESS_THRESHOLD_MS = 3 * 60 * 1000;
 export const BACKGROUND_FRESHNESS_THRESHOLD_MS = 3 * 60 * 1000;
-export const MANUAL_SYNC_FRESHNESS_THRESHOLD_MS = 0;
 export const DEFAULT_MANAGE_RETRY_AFTER_MS = 2000;
 
 export function resolveVectorStoreConfig(input: {

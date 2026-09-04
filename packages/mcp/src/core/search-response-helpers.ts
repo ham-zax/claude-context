@@ -69,7 +69,7 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             severity: "caution",
             blocksUse: false,
             message: "Index freshness was checked, but currently dirty or untracked files may have changed after the last sync and may not be represented.",
-            action: "Run manage_index sync only if those dirty or untracked files are relevant to the query, then retry the search.",
+            action: "Continue with Publication-backed evidence and inspect relevant dirty files directly; schedule manage_index sync when refreshed indexed evidence would materially help.",
         };
     }
     if (code === WARNING_CODES.SEARCH_DIRTY_FILE_EVIDENCE_UNAVAILABLE) {
@@ -78,7 +78,7 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             severity: "degraded",
             blocksUse: false,
             message: "A stale result from a dirty file was suppressed, but bounded current-source search could not replace it.",
-            action: "Narrow the query and inspect the file with read_file, or run manage_index sync before relying on results for that file.",
+            action: "Narrow the query and inspect the file directly with read_file; schedule manage_index sync later if refreshed indexed evidence would be useful.",
         };
     }
     if (code === WARNING_CODES.SEARCH_CHANGED_FILES_BOOST_SKIPPED) {
@@ -105,7 +105,7 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             severity: "degraded",
             blocksUse: false,
             message: "Vector search is using the proven generation, but watcher-backed source continuity is unavailable, so current-source freshness is unverified.",
-            action: "Use the returned vector results with source verification, or run manage_index sync before relying on current-worktree freshness.",
+            action: "Use the returned Publication-backed results with direct source verification when current-worktree parity matters; manage_index sync is optional maintenance to refresh indexed evidence.",
         };
     }
     if (code === WARNING_CODES.SOURCE_CHANGES_PENDING) {

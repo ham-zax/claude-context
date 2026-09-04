@@ -34,6 +34,7 @@ const manageIndexInputSchema = z.object({
     ignorePatterns: z.array(z.string()).optional().describe("Only for action='create'. Additional ignore patterns to apply."),
     zillizDropCollection: z.string().min(1).optional().describe("Only for action='create'. Zilliz-only: drop this Satori-managed collection before creating the new index."),
     detail: z.enum(MANAGE_INDEX_STATUS_DETAILS).optional().describe("Only for action='status'. Response projection: summary, capabilities, diagnostics, or full. Defaults to summary."),
+    operationId: z.string().min(1).optional().describe("Required only for action='cancel'. Exact live operation ID returned by sync/status."),
 }).superRefine((value, ctx) => {
     if (value.action !== "status" && value.detail !== undefined) {
         ctx.addIssue({
@@ -42,12 +43,26 @@ const manageIndexInputSchema = z.object({
             message: "detail is only valid for action='status'.",
         });
     }
+    if (value.action === "cancel" && value.operationId === undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["operationId"],
+            message: "operationId is required for action='cancel'.",
+        });
+    }
+    if (value.action !== "cancel" && value.operationId !== undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["operationId"],
+            message: "operationId is only valid for action='cancel'.",
+        });
+    }
 });
 
 export const manageIndexTool: McpTool = {
     name: "manage_index",
     description: () =>
-        "Manage index lifecycle operations (create/reindex/sync/status/clear) for the current Satori Publication. Ignore-rule edits in repo-root .satoriignore/.gitignore reconcile automatically in the normal sync path. Use sync for ordinary source or ignore-rule changes; use reindex when the current Publication is incompatible, missing, or unprovable. Successful sync responses include syncStats with added, removed, and modified counts. create/reindex return after kickoff; use status to observe progress and capabilities. Mutation responses may include a process-lifetime `operation` projection; it is not persisted as operation history. After process restart, status derives indexed state from the current Publication and may omit `operation`. Terminal phases are `completed`, `failed`, and `blocked`. Status detail=capabilities/diagnostics/full exposes language support, compatibility, and runtime-owner evidence.",
+        "Manage Publication lifecycle operations (create/reindex/sync/status/cancel/clear). A compatible completed Publication remains readable even when current-source parity is changed or unverified. Explicit sync is accepted as a supervised background operation; use status to observe its exact operation, source freshness, and pending-sync state while continuing the active information task. cancel requires the exact live sync operationId and never force-unlocks a root. Use reindex only when the current Publication is incompatible, missing, partial, or otherwise requires rebuild. Mutation operation state is process-lifetime diagnostic state, not persistent history. Status detail=capabilities/diagnostics/full exposes language support, compatibility, and runtime-owner evidence.",
     inputSchemaZod: () => manageIndexInputSchema,
     execute: async (args: unknown, ctx: ToolContext) => {
         const parsed = manageIndexInputSchema.safeParse(args || {});
@@ -108,7 +123,7 @@ export const manageIndexTool: McpTool = {
         };
         const providerOperation = input.action === "clear"
             ? "vector_only"
-            : (input.action === "create" || input.action === "reindex" || input.action === "sync")
+            : (input.action === "create" || input.action === "reindex")
                 ? "embedding_vector"
                 : null;
         let executionContext: ToolContext | MissingProviderConfigIssue;
@@ -165,7 +180,10 @@ export const manageIndexTool: McpTool = {
                     response = await executionContext.toolHandlers.handleReindexCodebase(input);
                     break;
                 case 'sync':
-                    response = await executionContext.toolHandlers.handleSyncCodebase(input);
+                    response = await executionContext.toolHandlers.handleSyncCodebase(
+                        input,
+                        executionContext.requestSignal,
+                    );
                     break;
                 case 'status':
                     response = await executionContext.toolHandlers.handleGetIndexingStatus(input);
@@ -177,6 +195,9 @@ export const manageIndexTool: McpTool = {
                         );
                     }
                     response = withStatusDetail(response, statusDetail);
+                    break;
+                case 'cancel':
+                    response = await executionContext.toolHandlers.handleCancelIndexOperation(input);
                     break;
                 case 'clear':
                     response = await executionContext.toolHandlers.handleClearIndex(input);

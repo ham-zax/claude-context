@@ -533,7 +533,6 @@ export class ToolHandlers {
             buildStaleLocalMessage: this.buildStaleLocalMessage.bind(this),
             buildReindexHint: this.buildReindexHint.bind(this),
             buildSyncHint: this.buildSyncHint.bind(this),
-            touchWatchedCodebase: this.touchWatchedCodebase.bind(this),
             manageVectorBackendResponse: this.toolResponseBuilders.manageVectorBackendResponse.bind(this.toolResponseBuilders),
             getLiveOwnersSummary: async () => {
                 if (!this.runtimeOwnerGate || typeof this.runtimeOwnerGate.getLiveOwnersSummary !== "function") {
@@ -2012,7 +2011,11 @@ export class ToolHandlers {
     /**
      * Handle sync request - manually trigger incremental sync for a codebase
      */
-    public async handleSyncCodebase(args: ToolArgs) {
-        return this.manageMaintenanceHandlers.handleSyncCodebase(args);
+    public async handleSyncCodebase(args: ToolArgs, requestSignal?: AbortSignal) {
+        return this.manageMaintenanceHandlers.handleSyncCodebase(args, requestSignal);
+    }
+
+    public async handleCancelIndexOperation(args: ToolArgs) {
+        return this.manageMaintenanceHandlers.handleCancelOperation(args);
     }
 }

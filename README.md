@@ -302,7 +302,7 @@ Restart OpenCode after restoring the published runtime.
 
 | Tool | Purpose |
 |---|---|
-| `manage_index` | Create, synchronize, inspect, reindex, or clear a repository index. Use status to inspect readiness, sync for source changes, and reindex when current authority is missing, corrupt, or incompatible. |
+| `manage_index` | Create, synchronize, inspect, cancel a live supervised sync, reindex, or clear a repository index. Compatible completed Publications remain readable while source freshness is changed/unverified or a replacement sync is running; status exposes that distinction. |
 | `search_codebase` | Run freshness-aware hybrid search and return symbol-owned evidence. Start here for behavior, ownership, configuration, or path discovery. |
 | `continue_search` | Reveal more of one frozen result set without rerunning retrieval. Use it when the initial disclosure is relevant but incomplete. |
 | `file_outline` | List the indexed symbols and spans in one file. Use it to choose an exact owner before reading implementation. |
@@ -323,7 +323,7 @@ Public paths are absolute. `read_file` is restricted to tracked searchable roots
 6. use continue_search only when the frozen result has more useful evidence
 ```
 
-If a tool returns `requires_reindex`, reindex before retrying the original call. Use `sync` for ordinary source changes. A search that arrives during a transient same-root sync joins it once and proceeds when it completes; other in-flight indexing returns `not_ready` with `retryAfterMs` and the active indexing operation so drivers can retry deterministically. For grouped pagination, `limit` bounds the frozen result set across every page and `disclosureLimit` controls only the initial page: `limit=20, disclosureLimit=6` returns up to six initially and freezes up to twenty. Search continuation `"complete"` means complete for that caller-bounded frozen set, never for the full available pool; `omittedBeyondLimitGroupCount` reports groups excluded by `limit`. Treat inbound call-graph results as leads to verify, not compiler-grade blast-radius proof.
+If a tool returns `requires_reindex`, reindex before retrying the original call. Use `sync` for ordinary source changes when refreshed indexed evidence is needed. Search and navigation do not wait for a same-root sync: when a compatible completed Publication exists, they continue from that pinned generation with stale/unverified provenance and pending-sync metadata. Create/reindex operations that do not expose a readable generation still return `not_ready` with the active operation so drivers can retry deterministically. For grouped pagination, `limit` bounds the frozen result set across every page and `disclosureLimit` controls only the initial page: `limit=20, disclosureLimit=6` returns up to six initially and freezes up to twenty. Search continuation `"complete"` means complete for that caller-bounded frozen set, never for the full available pool; `omittedBeyondLimitGroupCount` reports groups excluded by `limit`. Treat inbound call-graph results as leads to verify, not compiler-grade blast-radius proof.
 
 ## Index Profiles
 

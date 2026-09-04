@@ -11,6 +11,7 @@ export const MANAGE_INDEX_ACTIONS = [
     "reindex",
     "sync",
     "status",
+    "cancel",
     "clear",
 ] as const;
 
@@ -46,6 +47,9 @@ export type ManageIndexReason =
     | "vector_backend_unavailable"
     | "runtime_owner_conflict"
     | "mutation_in_progress"
+    | "operation_not_live"
+    | "operation_not_cancellable"
+    | "cancellation_requested"
     | "needs_create";
 
 export type VectorBackendResponseCode =
@@ -77,6 +81,24 @@ export interface IndexPublicationReceipt {
     policyHash: string;
 }
 
+export interface ManagePendingSync {
+    operationId: string;
+    generation: number;
+    phase: RootMutationOperation["phase"];
+    progress?: number;
+    heartbeatAt?: string;
+    progressAt?: string;
+    cancelRequestedAt?: string;
+    cancelReason?: string;
+    executorPid?: number;
+    executorProcessGroupId?: number;
+}
+
+export interface ManageSourceFreshness {
+    state: "verified" | "changed" | "unverified";
+    reason: string;
+}
+
 export interface ManageIndexResponseEnvelope {
     tool: "manage_index";
     version: 1;
@@ -99,6 +121,10 @@ export interface ManageIndexResponseEnvelope {
     operation?: RootMutationOperation;
     /** Stable published-generation identity, independent of sync operation ids. */
     publication?: IndexPublicationReceipt;
+    /** Read-only source parity assessment for the currently readable Publication. */
+    sourceFreshness?: ManageSourceFreshness;
+    /** Exact live sync state when a previous completed Publication remains readable. */
+    pendingSync?: ManagePendingSync;
     /** Observed symbol quality from registry (F9); not parser-cause diagnosis. */
     symbolQuality?: SymbolQualitySummary | ManageCompactSymbolQuality;
     /** Declared claims combined with compatible per-language navigation evidence. */

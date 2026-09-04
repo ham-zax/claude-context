@@ -78,7 +78,7 @@ In a fresh two-task OpenCode comparison where both arms answered correctly, Sato
 
 | Tool | Purpose |
 |---|---|
-| `manage_index` | Create, synchronize, inspect, reindex, or clear a repository index. Use status to inspect readiness, sync for source changes, and reindex when current authority is missing, corrupt, or incompatible. |
+| `manage_index` | Create, synchronize, inspect, cancel a live supervised sync, reindex, or clear a repository index. Compatible completed Publications remain readable while source freshness is changed/unverified or a replacement sync is running; status exposes that distinction. |
 | `search_codebase` | Run freshness-aware hybrid search and return symbol-owned evidence. `limit` bounds the frozen result set across all pages; `disclosureLimit` controls only the initial grouped page. For example, `limit=20, disclosureLimit=6` returns up to six initially and freezes up to twenty. |
 | `continue_search` | Reveal more of one frozen result set without rerunning retrieval. Use it when the initial disclosure is relevant but incomplete. A grouped envelope without continuation reports pagination.continuation="complete" for the caller-bounded frozen set only; omittedBeyondLimitGroupCount reports groups excluded by the caller limit. |
 | `call_graph` | Inspect advisory callers, callees, imports, and exports when supported. Verify inbound leads before blast-radius changes. |
@@ -96,7 +96,7 @@ In a fresh two-task OpenCode comparison where both arms answered correctly, Sato
 - Python inbound relationships cover bounded static constructor-receiver and
   direct service/callback value-origin patterns. Dynamic or ambiguous flows
   remain partial, so an absent inbound edge is not proof that no caller exists.
-- `manage_index` has no repair path. Use `sync` for ordinary source divergence and `reindex` when current Publication authority is missing, corrupt, or incompatible.
+- `manage_index` has no force-unlock or repair path. Explicit `sync` runs as supervised background maintenance while a compatible completed Publication remains readable; `cancel` targets only the exact live sync operation ID. Use `reindex` when current Publication authority is missing, corrupt, partial, or incompatible.
 - Provider, model, dimensions, projection, and vector backend are persisted compatibility identities; changing them requires a reindex.
 - Multiple incompatible live Satori runtimes are blocked from mutating the same publication. Mutation ownership is scoped to the backend authority root: each LanceDB state root has its own owner registry, and Milvus runtimes are keyed by endpoint.
 - Rerank context v4 sends the exact question once plus a positive-only answer

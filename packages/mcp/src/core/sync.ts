@@ -276,6 +276,12 @@ interface EnsureFreshnessOptions {
     preparedPublication?: PublicationRef;
     exactSourceComparisonPaths?: readonly string[];
     fullSourceComparison?: boolean;
+    onSyncProgress?: (progress: {
+        phase: string;
+        current: number;
+        total: number;
+        percentage: number;
+    }) => void;
     onPhaseTiming?: (
         phase:
             | 'checkpoint_proof'
@@ -303,7 +309,7 @@ export type ReadFreshnessOptions = Pick<
 
 type SyncExecutionRequest = Pick<
     EnsureFreshnessOptions,
-    'exactSourceComparisonPaths' | 'onPhaseTiming'
+    'exactSourceComparisonPaths' | 'onSyncProgress' | 'onPhaseTiming'
 >;
 
 interface IgnoreReloadResult {
@@ -1047,6 +1053,7 @@ export class SyncManager {
                 options.coalescedEdits,
                 undefined,
                 sourcePublication,
+                options,
             );
             if (decision.mode === 'reconciled_ignore_change') {
                 this.coverWatcherObservation(codebasePath, flightEpoch);
@@ -1106,6 +1113,7 @@ export class SyncManager {
                     1,
                     currentIgnoreControlSignature,
                     sourcePublication,
+                    options,
                 );
                 if (decision.mode === 'reconciled_ignore_change') {
                     this.coverWatcherObservation(codebasePath, flightEpoch);
@@ -1201,6 +1209,7 @@ export class SyncManager {
                     currentIgnoreControlSignature,
                     {
                         exactSourceComparisonPaths: options.exactSourceComparisonPaths,
+                        onSyncProgress: options.onSyncProgress,
                         onPhaseTiming: options.onPhaseTiming,
                     },
                     sourcePublication,
@@ -1268,6 +1277,7 @@ export class SyncManager {
         coalescedEdits: number = 1,
         nextIgnoreControlSignature?: string,
         preparedPublication?: PublicationRef,
+        executionRequest: SyncExecutionRequest = {},
     ): Promise<FreshnessDecision> {
         const reconcileKey = this.normalizeReconcileKey(codebasePath);
         const inFlight = this.activeIgnoreReconciles.get(reconcileKey);
@@ -1294,6 +1304,7 @@ export class SyncManager {
                         coalescedEdits,
                         nextIgnoreControlSignature,
                         preparedPublication,
+                        executionRequest,
                     );
                     this.activeIgnoreReconciles.set(reconcileKey, promise);
                     const decision = await promise;
@@ -1342,6 +1353,7 @@ export class SyncManager {
         coalescedEdits: number = 1,
         nextIgnoreControlSignature?: string,
         preparedPublication?: PublicationRef,
+        executionRequest: SyncExecutionRequest = {},
     ): Promise<FreshnessDecision> {
         const checkedAtMs = this.now();
         const checkedAt = new Date(checkedAtMs).toISOString();
@@ -1403,6 +1415,8 @@ export class SyncManager {
             const syncDecision = await this.ensureFreshness(codebasePath, 0, {
                 skipIgnoreControlCheck: true,
                 preparedPublication,
+                onSyncProgress: executionRequest.onSyncProgress,
+                onPhaseTiming: executionRequest.onPhaseTiming,
             });
             const lastSyncAt = syncDecision.lastSyncAt;
             const lastSyncMs = lastSyncAt ? Date.parse(lastSyncAt) : undefined;
@@ -1433,6 +1447,8 @@ export class SyncManager {
                 try {
                     const fallbackDecision = await this.ensureFreshness(codebasePath, 0, {
                         skipIgnoreControlCheck: true,
+                        onSyncProgress: executionRequest.onSyncProgress,
+                        onPhaseTiming: executionRequest.onPhaseTiming,
                     });
                     fallbackSyncExecuted = true;
                     fallbackStats = fallbackDecision.stats;
@@ -1537,7 +1553,11 @@ export class SyncManager {
                     this.mutationRuntime.assertCurrent(codebasePath);
                     lastOperation = this.publishOperationPhase(codebasePath, "writing");
                     const publicationStartedAt = Date.now();
-                    const stats: SyncStats = await this.context.reindexByChange(codebasePath, undefined, syncOptions);
+                    const stats: SyncStats = await this.context.reindexByChange(
+                        codebasePath,
+                        joinRequest.onSyncProgress,
+                        syncOptions,
+                    );
                     joinRequest.onPhaseTiming?.(
                         'incremental_publication',
                         Math.max(0, Date.now() - publicationStartedAt),

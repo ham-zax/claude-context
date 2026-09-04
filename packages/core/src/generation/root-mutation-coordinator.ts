@@ -385,6 +385,48 @@ export class MutationLeaseCoordinator {
         });
     }
 
+    public attachBoundExecutor(
+        root: string,
+        operationId: string,
+        action: MutationLeaseAction,
+    ): RootMutationLease {
+        const canonicalRoot = canonicalizeRoot(root);
+        return this.withRootLock(canonicalRoot, () => {
+            const state = this.readState(canonicalRoot);
+            const lease = state.lease;
+            const currentProcessStartTime = this.currentProcess.processStartTime;
+            if (
+                !lease
+                || lease.operationId !== operationId
+                || lease.action !== action
+                || lease.executorPid !== this.currentProcess.pid
+                || lease.executorProcessGroupId !== this.currentProcess.pid
+                || !lease.executorProcessStartTime
+                || !currentProcessStartTime
+                || lease.executorProcessStartTime !== currentProcessStartTime
+                || !this.isExecutorLive(lease)
+            ) {
+                throw new Error(
+                    `Mutation executor ${this.currentProcess.pid} is not the bound live owner of operation '${operationId}' for '${canonicalRoot}'.`,
+                );
+            }
+
+            const now = new Date(this.now()).toISOString();
+            this.operationsByRoot.set(canonicalRoot, {
+                id: lease.operationId,
+                action: lease.action,
+                canonicalRoot,
+                generation: lease.generation,
+                acceptedAt: lease.acquiredAt,
+                phase: 'accepted',
+                updatedAt: now,
+                heartbeatAt: now,
+                progressAt: now,
+            });
+            return { ...lease };
+        });
+    }
+
     public bindExecutor(
         lease: RootMutationLease,
         executor: { pid: number; processGroupId?: number },

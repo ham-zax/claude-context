@@ -186,6 +186,56 @@ export class RootMutationRuntime {
         });
     }
 
+    /**
+     * Enter the exact durable mutation lease already bound to this executor
+     * process. This never acquires or releases the lease; the supervising
+     * parent remains its lifetime owner and may release only after executor
+     * quiescence is proven.
+     */
+    async runBoundExecutor<T>(
+        root: string,
+        action: RootMutationAction,
+        operationId: string,
+        work: (execution: RootMutationExecution) => Promise<T> | T,
+        options: RootMutationExecutionOptions = {},
+    ): Promise<T> {
+        if (options.signal?.aborted) {
+            throw options.signal.reason ?? new Error('Mutation executor was cancelled before attachment.');
+        }
+        const coordinator = requireCoordinator(this);
+        const scopes = requireOperationScopes(this);
+        const current = scopes.getStore();
+        if (current && coordinator.isLeaseForRoot(current, root)) {
+            coordinator.assertCurrent(current);
+            if (current.operationId !== operationId || current.action !== action) {
+                throw new Error(`Mutation executor scope does not match operation '${operationId}'.`);
+            }
+            return await work(requireOperationControl(this, current.operationId).execution);
+        }
+
+        const lease = coordinator.attachBoundExecutor(root, operationId, action);
+        const control = createOperationControl(this, lease);
+        requireOperationControls(this).set(operationId, control);
+        return await scopes.run(lease, async () => {
+            const unlinkSourceCancellation = linkSourceCancellation(
+                options.signal,
+                () => {
+                    if (!control.controller.signal.aborted) {
+                        control.controller.abort(
+                            options.signal?.reason ?? new RootMutationCancelledError(operationId),
+                        );
+                    }
+                },
+            );
+            try {
+                return await work(control.execution);
+            } finally {
+                unlinkSourceCancellation();
+                requireOperationControls(this).delete(operationId);
+            }
+        });
+    }
+
     start<T>(
         root: string,
         action: RootMutationAction,
