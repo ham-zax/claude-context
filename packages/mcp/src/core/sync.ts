@@ -48,7 +48,29 @@ export type FreshnessDecisionMode =
     | 'skipped_missing_path'
     | 'reconciled_ignore_change'
     | 'ignore_reload_failed'
-    | 'served_previous_generation';
+    | 'served_previous_generation'
+    | 'read_only';
+
+export type SourceFreshnessAssessment =
+    | {
+        state: 'verified';
+        reason: 'watcher_continuity' | 'exact_source_comparison' | 'full_source_comparison';
+    }
+    | {
+        state: 'changed';
+        reason: 'ignore_control_changed' | 'exact_source_comparison' | 'full_source_comparison';
+    }
+    | {
+        state: 'unverified';
+        reason:
+            | PreparedReadObservationUnavailableReason
+            | 'source_checkpoint_probe_failed'
+            | 'ignore_control_probe_failed'
+            | 'exact_source_comparison_unavailable'
+            | 'exact_source_comparison_failed'
+            | 'full_source_comparison_unavailable'
+            | 'full_source_comparison_failed';
+    };
 
 export interface FreshnessDecision {
     mode: FreshnessDecisionMode;
@@ -77,6 +99,7 @@ export interface FreshnessDecision {
         action: string;
         generation: number;
     };
+    sourceFreshness?: SourceFreshnessAssessment;
 }
 
 export type FreshnessTriggerReason =
@@ -205,7 +228,7 @@ export type PreparedReadWatcherDiagnostics = {
 interface SyncExecutionOutcome {
     mode: Exclude<
         FreshnessDecisionMode,
-        'skipped_recent' | 'skipped_source_unchanged' | 'skipped_source_checkpoint_unavailable'
+        'skipped_recent' | 'skipped_source_unchanged' | 'skipped_source_checkpoint_unavailable' | 'read_only'
     >;
     stats?: SyncStats;
     activeMutation?: RootMutationActivity;
@@ -272,6 +295,11 @@ interface EnsureFreshnessOptions {
         durationMs: number,
     ) => void;
 }
+
+export type ReadFreshnessOptions = Pick<
+    EnsureFreshnessOptions,
+    'preparedPublication' | 'exactSourceComparisonPaths' | 'fullSourceComparison' | 'onPhaseTiming'
+>;
 
 type SyncExecutionRequest = Pick<
     EnsureFreshnessOptions,
@@ -752,8 +780,242 @@ export class SyncManager {
     }
 
     /**
+     * Read-only freshness assessment for ordinary search/navigation requests.
+     *
+     * This may inspect source/checkpoint state and advance watcher proof only
+     * when a source comparison proves equality. It never starts, joins, or
+     * awaits Publication mutation.
+     */
+    public async assessReadFreshness(
+        codebasePath: string,
+        thresholdMs: number = 60000,
+        options: ReadFreshnessOptions = {},
+    ): Promise<FreshnessDecision> {
+        codebasePath = this.canonicalWatcherRoot(codebasePath);
+        const flightEpoch = this.captureWatcherFlightEpoch(codebasePath);
+        const checkedAtMs = this.now();
+        const checkedAt = new Date(checkedAtMs).toISOString();
+        const sourcePublication = options.preparedPublication
+            ?? this.context.getCurrentPublication(codebasePath)
+            ?? undefined;
+        const lastSync = this.lastSyncTimes.get(codebasePath);
+        const withReadMetadata = (
+            decision: Omit<FreshnessDecision, 'checkedAt' | 'thresholdMs'>,
+        ): FreshnessDecision => ({
+            ...decision,
+            checkedAt,
+            thresholdMs,
+            ...(lastSync !== undefined
+                ? {
+                    lastSyncAt: new Date(lastSync).toISOString(),
+                    ageMs: Math.max(0, checkedAtMs - lastSync),
+                }
+                : {}),
+        });
+
+        let checkpointValidation: SourceFreshnessCheckpointValidation;
+        try {
+            const checkpointValidationStartedAt = Date.now();
+            checkpointValidation = await this.validateSourceFreshnessCheckpoint(
+                codebasePath,
+                checkedAt,
+                thresholdMs,
+                sourcePublication,
+            );
+            options.onPhaseTiming?.(
+                'checkpoint_proof',
+                Math.max(0, Date.now() - checkpointValidationStartedAt),
+            );
+        } catch (error) {
+            return withReadMetadata({
+                mode: 'read_only',
+                errorMessage: errorMessage(error),
+                sourceFreshness: {
+                    state: 'unverified',
+                    reason: 'source_checkpoint_probe_failed',
+                },
+            });
+        }
+        if ('failure' in checkpointValidation) {
+            return {
+                ...checkpointValidation.failure,
+                ...(lastSync !== undefined
+                    ? {
+                        lastSyncAt: new Date(lastSync).toISOString(),
+                        ageMs: Math.max(0, checkedAtMs - lastSync),
+                    }
+                    : {}),
+                sourceFreshness: {
+                    state: 'unverified',
+                    reason: checkpointValidation.failure.checkpointStatus === 'corrupt'
+                        ? 'checkpoint_corrupt'
+                        : 'checkpoint_missing',
+                },
+            };
+        }
+
+        try {
+            const acceptedIgnoreControlSignature = sourcePublication?.publication.policy.controlSignature;
+            if (
+                typeof acceptedIgnoreControlSignature === 'string'
+                && acceptedIgnoreControlSignature !== await this.computeIgnoreControlSignature(codebasePath)
+            ) {
+                return withReadMetadata({
+                    mode: 'read_only',
+                    sourceFreshness: {
+                        state: 'changed',
+                        reason: 'ignore_control_changed',
+                    },
+                });
+            }
+        } catch (error) {
+            return withReadMetadata({
+                mode: 'read_only',
+                errorMessage: errorMessage(error),
+                sourceFreshness: {
+                    state: 'unverified',
+                    reason: 'ignore_control_probe_failed',
+                },
+            });
+        }
+
+        let exactMatched = false;
+        let exactComparisonUnverifiedReason:
+            | 'exact_source_comparison_unavailable'
+            | 'exact_source_comparison_failed'
+            | undefined;
+        const exactSourceComparisonPaths = options.exactSourceComparisonPaths;
+        if (exactSourceComparisonPaths && exactSourceComparisonPaths.length > 0) {
+            const compareSourcePaths = this.context.compareSourcePathsToFreshnessCheckpoint;
+            if (typeof compareSourcePaths !== 'function') {
+                exactComparisonUnverifiedReason = 'exact_source_comparison_unavailable';
+            } else {
+                try {
+                    const exactComparisonStartedAt = Date.now();
+                    const comparison = await compareSourcePaths.call(
+                        this.context,
+                        codebasePath,
+                        exactSourceComparisonPaths,
+                        sourcePublication,
+                    );
+                    options.onPhaseTiming?.(
+                        'exact_path_comparison',
+                        Math.max(0, Date.now() - exactComparisonStartedAt),
+                    );
+                    if (comparison.status === 'differs') {
+                        return withReadMetadata({
+                            mode: 'read_only',
+                            sourceFreshness: {
+                                state: 'changed',
+                                reason: 'exact_source_comparison',
+                            },
+                        });
+                    }
+                    if (comparison.status === 'matches') {
+                        exactMatched = true;
+                    } else {
+                        exactComparisonUnverifiedReason = 'exact_source_comparison_unavailable';
+                    }
+                } catch (error) {
+                    exactComparisonUnverifiedReason = 'exact_source_comparison_failed';
+                }
+            }
+        }
+
+        let fullMatched = false;
+        if (options.fullSourceComparison === true) {
+            const compareAllSource = this.context.compareAllSourceToFreshnessCheckpoint;
+            if (typeof compareAllSource !== 'function') {
+                return withReadMetadata({
+                    mode: 'read_only',
+                    sourceFreshness: {
+                        state: 'unverified',
+                        reason: 'full_source_comparison_unavailable',
+                    },
+                });
+            }
+            try {
+                const fullComparisonStartedAt = Date.now();
+                const comparison = await compareAllSource.call(
+                    this.context,
+                    codebasePath,
+                    sourcePublication,
+                );
+                options.onPhaseTiming?.(
+                    'exact_path_comparison',
+                    Math.max(0, Date.now() - fullComparisonStartedAt),
+                );
+                if (comparison.status === 'differs') {
+                    return withReadMetadata({
+                        mode: 'read_only',
+                        sourceFreshness: {
+                            state: 'changed',
+                            reason: 'full_source_comparison',
+                        },
+                    });
+                }
+                if (comparison.status === 'unavailable') {
+                    return withReadMetadata({
+                        mode: 'read_only',
+                        sourceFreshness: {
+                            state: 'unverified',
+                            reason: 'full_source_comparison_unavailable',
+                        },
+                    });
+                }
+                fullMatched = true;
+                this.coverWatcherObservation(codebasePath, flightEpoch);
+            } catch (error) {
+                return withReadMetadata({
+                    mode: 'read_only',
+                    errorMessage: errorMessage(error),
+                    sourceFreshness: {
+                        state: 'unverified',
+                        reason: 'full_source_comparison_failed',
+                    },
+                });
+            }
+        } else if (exactMatched && !this.hasPendingWatcherObservation(codebasePath)) {
+            this.coverWatcherObservation(codebasePath, flightEpoch);
+        }
+
+        if (exactComparisonUnverifiedReason && !fullMatched) {
+            return withReadMetadata({
+                mode: 'read_only',
+                sourceFreshness: {
+                    state: 'unverified',
+                    reason: exactComparisonUnverifiedReason,
+                },
+            });
+        }
+
+        const preparedObservation = this.getPreparedReadObservation(codebasePath);
+        if (!preparedObservation.available) {
+            return withReadMetadata({
+                mode: exactMatched || fullMatched ? 'skipped_source_unchanged' : 'read_only',
+                sourceFreshness: {
+                    state: 'unverified',
+                    reason: preparedObservation.reason,
+                },
+            });
+        }
+
+        return withReadMetadata({
+            mode: exactMatched || fullMatched ? 'skipped_source_unchanged' : 'read_only',
+            sourceFreshness: {
+                state: 'verified',
+                reason: fullMatched
+                    ? 'full_source_comparison'
+                    : exactMatched
+                        ? 'exact_source_comparison'
+                        : 'watcher_continuity',
+            },
+        });
+    }
+
+    /**
      * Ensures the codebase is fresh before use.
-     * Unified entry point for ALL sync operations (manual, periodic, and on-read).
+     * Unified entry point for explicit/background sync operations.
      */
     public async ensureFreshness(
         codebasePath: string,
@@ -870,6 +1132,7 @@ export class SyncManager {
                     Math.max(0, Date.now() - exactComparisonStartedAt),
                 );
                 if (comparison.status === 'matches') {
+                    this.coverWatcherObservation(codebasePath, flightEpoch);
                     return {
                         mode: 'skipped_source_unchanged',
                         checkedAt,
@@ -895,6 +1158,7 @@ export class SyncManager {
                     Math.max(0, Date.now() - fullComparisonStartedAt),
                 );
                 if (comparison.status === 'matches') {
+                    this.coverWatcherObservation(codebasePath, flightEpoch);
                     return {
                         mode: 'skipped_source_unchanged',
                         checkedAt,

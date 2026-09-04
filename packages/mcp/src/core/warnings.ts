@@ -1,3 +1,5 @@
+import type { FreshnessDecision } from "./sync.js";
+
 export const WARNING_CODES = {
     REINDEX_UNNECESSARY_IGNORE_ONLY: 'REINDEX_UNNECESSARY_IGNORE_ONLY',
     REINDEX_PREFLIGHT_UNKNOWN: 'REINDEX_PREFLIGHT_UNKNOWN',
@@ -29,4 +31,20 @@ export const WARNING_CODE_SET: ReadonlySet<WarningCode> = new Set<WarningCode>(O
 
 export function isWarningCode(value: unknown): value is WarningCode {
     return typeof value === 'string' && WARNING_CODE_SET.has(value as WarningCode);
+}
+
+export function buildFreshnessWarningCodes(decision: FreshnessDecision): WarningCode[] {
+    if (decision.mode === 'skipped_source_checkpoint_unavailable') {
+        return [WARNING_CODES.SOURCE_FRESHNESS_CHECKPOINT_UNAVAILABLE];
+    }
+    if (decision.mode === 'served_previous_generation') {
+        return [WARNING_CODES.SOURCE_CHANGES_PENDING];
+    }
+    if (decision.sourceFreshness?.state === 'changed') {
+        return [WARNING_CODES.SOURCE_CHANGES_PENDING];
+    }
+    if (decision.sourceFreshness?.state === 'unverified') {
+        return [WARNING_CODES.SOURCE_FRESHNESS_UNVERIFIED];
+    }
+    return [];
 }

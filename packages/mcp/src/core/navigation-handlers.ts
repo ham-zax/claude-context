@@ -42,6 +42,8 @@ import {
     type RelationshipBackedCallGraphResult,
 } from "./relationship-backed-call-graph.js";
 import { ToolResponseBuilders } from "./tool-response-builders.js";
+import type { FreshnessDecision } from "./sync.js";
+import { buildFreshnessWarningCodes } from "./warnings.js";
 import type {
     CallGraphDirection,
     CallGraphEdgeResult as CallGraphEdge,
@@ -83,7 +85,7 @@ type NavigationHandlersHost = {
     prepareNavigationRead(absolutePath: string): Promise<TrackedRootReadinessState>;
 
 
-    acquirePublicationLease(codebasePath: string): PublicationLease | undefined;
+    acquirePublicationLease(codebasePath: string, publicationId?: string): PublicationLease | undefined;
     isPublicationAdmitted(publication: PublicationRef): Promise<boolean>;
     getPublicationNavigationAddress(publication: PublicationRef): {
         publicationId: string;
@@ -275,6 +277,22 @@ function buildAnalysisUnavailableFileOutlinePayload(
         hasMore: false,
         message,
     };
+}
+
+function withNavigationFreshness<T extends FileOutlineResponseEnvelope | CallGraphResponseEnvelope>(
+    payload: T,
+    freshnessDecision: FreshnessDecision | undefined,
+): T {
+    if (!freshnessDecision) return payload;
+    const warnings = Array.from(new Set([
+        ...(payload.warnings ?? []),
+        ...buildFreshnessWarningCodes(freshnessDecision),
+    ])).sort();
+    return {
+        ...payload,
+        freshnessDecision,
+        ...(warnings.length > 0 ? { warnings } : {}),
+    } as T;
 }
 
 function withStructuralAnalysis(
@@ -520,7 +538,7 @@ export class NavigationHandlers {
                 prepareReadiness: () => this.host.prepareNavigationRead(absoluteRoot),
                 acquirePublicationLease: (prepared) => (
                     prepared.state === 'ready'
-                        ? this.host.acquirePublicationLease(prepared.root.path)
+                        ? this.host.acquirePublicationLease(prepared.root.path, prepared.publication.id)
                         : undefined
                 ),
                 isLeaseAdmitted: (_prepared, lease) => this.host.isPublicationAdmitted(lease),
@@ -877,7 +895,7 @@ export class NavigationHandlers {
                 prepareReadiness: () => this.host.prepareNavigationRead(absolutePath),
                 acquirePublicationLease: (prepared) => (
                     prepared.state === 'ready'
-                        ? this.host.acquirePublicationLease(prepared.root.path)
+                        ? this.host.acquirePublicationLease(prepared.root.path, prepared.publication.id)
                         : undefined
                 ),
                 isLeaseAdmitted: (_prepared, lease) => this.host.isPublicationAdmitted(lease),
@@ -1033,7 +1051,7 @@ export class NavigationHandlers {
                 symbolIdExact: symbolRef.symbolId,
             });
             if (exactRegistrySymbols.length === 0) {
-                const payload = this.host.withProofDebugHint({
+                const payload = withNavigationFreshness(this.host.withProofDebugHint({
                     status: "not_found" as const,
                     path: effectiveRoot,
                     symbolRef,
@@ -1046,14 +1064,14 @@ export class NavigationHandlers {
                     notesTruncated: false,
                     totalNoteCount: 0,
                     returnedNoteCount: 0,
-                } satisfies CallGraphResponseEnvelope, proofDebugHint);
+                } satisfies CallGraphResponseEnvelope, proofDebugHint), leasedRootState.freshnessDecision);
                 return {
                     content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
                 };
             }
 
             if (exactRegistrySymbols.length > 1) {
-                const payload = this.host.withProofDebugHint({
+                const payload = withNavigationFreshness(this.host.withProofDebugHint({
                     status: "not_found" as const,
                     path: effectiveRoot,
                     symbolRef,
@@ -1066,7 +1084,7 @@ export class NavigationHandlers {
                     notesTruncated: false,
                     totalNoteCount: 0,
                     returnedNoteCount: 0,
-                } satisfies CallGraphResponseEnvelope, proofDebugHint);
+                } satisfies CallGraphResponseEnvelope, proofDebugHint), leasedRootState.freshnessDecision);
                 return {
                     content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
                 };
@@ -1285,13 +1303,13 @@ export class NavigationHandlers {
                 relationshipBuiltAt: compatibility.relationships.manifest.builtAt,
                 publicationCompletedAt: lease.publication.createdAt,
             });
-            const payload = this.host.withProofDebugHint({
+            const payload = withNavigationFreshness(this.host.withProofDebugHint({
                 status: "ok" as const,
                 path: effectiveRoot,
                 symbolRef,
                 ...(navigationAuthority ? { navigationAuthority } : {}),
                 ...relationshipBackedGraph,
-            } satisfies CallGraphResponseEnvelope, proofDebugHint);
+            } satisfies CallGraphResponseEnvelope, proofDebugHint), leasedRootState.freshnessDecision);
             return {
                 content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
             };
@@ -1584,8 +1602,12 @@ export class NavigationHandlers {
                 }
             }
         }
+        const freshnessProjectedPayload = withNavigationFreshness(
+            projectedPayload,
+            trackedRootState.freshnessDecision,
+        );
         return {
-            content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(projectedPayload, proofDebugHint)) }],
+            content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(freshnessProjectedPayload, proofDebugHint)) }],
         };
     }
 }

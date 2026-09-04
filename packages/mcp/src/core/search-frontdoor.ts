@@ -12,7 +12,7 @@ import type {
 } from "./search-types.js";
 import { SEARCH_RESPONSE_FORMAT_VERSION } from "./search-types.js";
 import type { FreshnessDecision } from "./sync.js";
-import { WARNING_CODES } from "./warnings.js";
+import { buildFreshnessWarningCodes } from "./warnings.js";
 import type {
     CompletionProbeDebugHint,
     TrackedRootReadiness,
@@ -54,7 +54,6 @@ export type SearchFrontDoorHost = {
         "buildIndexFailedSearchPayload" | "buildMissingLocalCollectionSearchPayload"
     >;
     prepareInitialTrackedRootRead: (absolutePath: string) => Promise<TrackedRootReadinessState>;
-    waitForSearchableSync?: (codebasePath: string, timeoutMs: number) => Promise<boolean>;
     preparePostFreshnessTrackedRootRead: (
         absolutePath: string,
         reason: Extract<
@@ -62,7 +61,7 @@ export type SearchFrontDoorHost = {
             "freshness_changed" | "observation_unavailable" | "observation_changed"
         >,
     ) => Promise<TrackedRootReadinessState>;
-    ensureSearchFreshness: (
+    assessSearchFreshness: (
         effectiveRoot: string,
         preparedRead?: Extract<TrackedRootReadinessState, { state: "ready" }>,
     ) => Promise<FreshnessDecision>;
@@ -195,7 +194,10 @@ function readyResult(
         effectiveRoot: state.root.path,
         searchableRoot: state.root,
         freshnessDecision,
-        partialIndexSearchWarnings: buildReadinessWarnings(host, state),
+        partialIndexSearchWarnings: [
+            ...buildReadinessWarnings(host, state),
+            ...buildFreshnessWarningCodes(freshnessDecision),
+        ],
         proofDebugHint: state.proofDebugHint,
         publication: state.publication,
         navigationStatus: state.navigationStatus,
@@ -236,14 +238,11 @@ export async function runSearchFrontDoor(
     }
     trackCodebasePath(absolutePath);
 
-    let state = await host.prepareInitialTrackedRootRead(absolutePath);
-    if (
-        state.state === "indexing"
-        && state.operation?.action === "sync"
-        && state.searchableGenerationAvailable
-        && state.searchableRead
-    ) {
-        const readable = state.searchableRead;
+    const servePreviousGeneration = (
+        readable: Extract<TrackedRootReadinessState, { state: "ready" }>,
+        operation: TrackedRootIndexingOperation | undefined,
+    ): SearchFrontDoorReady | null => {
+        if (operation?.action !== "sync") return null;
         const freshnessDecision: FreshnessDecision = {
             mode: "served_previous_generation",
             checkedAt: new Date().toISOString(),
@@ -251,29 +250,36 @@ export async function runSearchFrontDoor(
             servedCollection: readable.publication.publication.vector.collectionName,
             servedPublicationId: readable.publication.id,
             pendingOperation: {
-                action: state.operation.action,
-                generation: state.operation.generation,
+                action: operation.action,
+                generation: operation.generation,
             },
         };
         host.noteFreshnessMode(freshnessDecision.mode);
         return readyResult(readable, absolutePath, freshnessDecision, host);
+    };
+
+    let state = await host.prepareInitialTrackedRootRead(absolutePath);
+    if (state.state === "ready") {
+        const previousGeneration = servePreviousGeneration(
+            state,
+            host.getIndexingOperation?.(state.root.path),
+        );
+        if (previousGeneration) return previousGeneration;
     }
     if (
         state.state === "indexing"
-        && state.operation?.action === "sync"
         && state.searchableGenerationAvailable
-        && host.waitForSearchableSync
-        && await host.waitForSearchableSync(state.codebasePath, DEFAULT_MANAGE_RETRY_AFTER_MS)
+        && state.searchableRead
     ) {
-        state = await host.prepareInitialTrackedRootRead(absolutePath);
+        const previousGeneration = servePreviousGeneration(state.searchableRead, state.operation);
+        if (previousGeneration) return previousGeneration;
     }
-
     const blocked = buildBlockedReadinessPayload(state, searchContext, host);
     if (blocked) return { kind: "blocked", payload: blocked };
     if (state.state !== "ready") throw new Error(`Unexpected readiness state: ${state.state}`);
 
     const initialRoot = state.root.path;
-    const freshnessDecision = await host.ensureSearchFreshness(initialRoot, state);
+    const freshnessDecision = await host.assessSearchFreshness(initialRoot, state);
     host.noteFreshnessMode(freshnessDecision.mode);
     const freshnessBlocked = host.buildFreshnessBlockedSearchPayload(initialRoot, freshnessDecision, searchContext);
     if (freshnessBlocked) {
@@ -295,6 +301,30 @@ export async function runSearchFrontDoor(
         absolutePath,
         "freshness_changed",
     );
+    if (postFreshness.state === "ready") {
+        if (path.resolve(postFreshness.root.path) !== path.resolve(initialRoot)) {
+            throw new Error("Tracked root identity changed during search freshness validation.");
+        }
+        const previousGeneration = servePreviousGeneration(
+            postFreshness,
+            host.getIndexingOperation?.(postFreshness.root.path),
+        );
+        if (previousGeneration) return previousGeneration;
+    }
+    if (
+        postFreshness.state === "indexing"
+        && postFreshness.searchableGenerationAvailable
+        && postFreshness.searchableRead
+    ) {
+        if (path.resolve(postFreshness.searchableRead.root.path) !== path.resolve(initialRoot)) {
+            throw new Error("Tracked root identity changed during search freshness validation.");
+        }
+        const previousGeneration = servePreviousGeneration(
+            postFreshness.searchableRead,
+            postFreshness.operation,
+        );
+        if (previousGeneration) return previousGeneration;
+    }
     const postBlocked = buildBlockedReadinessPayload(postFreshness, searchContext, host);
     if (postBlocked) return { kind: "blocked", payload: postBlocked };
     if (postFreshness.state !== "ready") {
@@ -304,12 +334,5 @@ export async function runSearchFrontDoor(
         throw new Error("Tracked root identity changed during search freshness validation.");
     }
 
-    const result = readyResult(postFreshness, absolutePath, freshnessDecision, host);
-    if (freshnessDecision.mode === "skipped_source_checkpoint_unavailable") {
-        result.partialIndexSearchWarnings = [
-            ...result.partialIndexSearchWarnings,
-            WARNING_CODES.SOURCE_FRESHNESS_CHECKPOINT_UNAVAILABLE,
-        ];
-    }
-    return result;
+    return readyResult(postFreshness, absolutePath, freshnessDecision, host);
 }

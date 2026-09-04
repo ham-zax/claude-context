@@ -4,6 +4,7 @@ import {
     type PublicationRef,
 } from "@zokizuan/satori-core";
 import type { CallGraphDirection, CallGraphSymbolRef } from "./search-types.js";
+import type { FreshnessDecision } from "./sync.js";
 import type {
     CompletionProofReason,
     CompletionProofValidationResult,
@@ -81,6 +82,7 @@ export type TrackedRootReadinessState =
         proofDebugHint?: CompletionProbeDebugHint;
         publication: PublicationRef;
         navigationStatus: PublicationNavigationStatus;
+        freshnessDecision?: FreshnessDecision;
     }
     | { state: "requires_reindex"; codebasePath: string; message?: string }
     | {

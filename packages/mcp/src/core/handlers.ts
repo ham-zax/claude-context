@@ -581,8 +581,8 @@ export class ToolHandlers {
                 touchWatchedCodebaseBestEffort: (codebasePath) => (
                     this.touchWatchedCodebaseBestEffort(codebasePath)
                 ),
-                ensureFreshness: (codebasePath, thresholdMs, options) => (
-                    getSearchSyncManager().ensureFreshness(codebasePath, thresholdMs, options)
+                assessReadFreshness: (codebasePath, thresholdMs, options) => (
+                    getSearchSyncManager().assessReadFreshness(codebasePath, thresholdMs, options)
                 ),
                 get getPreparedReadDiagnostics() {
                     const syncManager = getSearchSyncManager();
@@ -600,9 +600,6 @@ export class ToolHandlers {
                 getWatcherObservation: (codebasePath) => this.getWatcherObservation(codebasePath),
                 getChangedFilesForCodebase: (codebasePath, options) => (
                     this.getChangedFilesForCodebase(codebasePath, options)
-                ),
-                waitForSearchableSync: (codebasePath, timeoutMs) => (
-                    this.waitForSearchableSync(codebasePath, timeoutMs)
                 ),
                 getTrackedRootReadiness: () => this.trackedRootReadiness,
                 isPartialIndexNavigationUnavailable: (info) => (
@@ -986,18 +983,93 @@ export class ToolHandlers {
             registryLoads: 0,
             navigationValidationRuns: 0,
         };
+        const prepareReadableState = async (
+            ready: Extract<TrackedRootReadinessState, { state: 'ready' }>,
+        ): Promise<TrackedRootReadinessState> => {
+            const activeOperation = this.getIndexingOperationForReadiness(ready.root.path);
+            if (activeOperation && activeOperation.action !== 'sync') {
+                return {
+                    state: 'indexing',
+                    codebasePath: ready.root.path,
+                    operation: activeOperation,
+                    searchableGenerationAvailable: true,
+                };
+            }
+            if (activeOperation?.action === 'sync') {
+                return {
+                    ...ready,
+                    freshnessDecision: {
+                        mode: 'served_previous_generation',
+                        checkedAt: new Date(this.now()).toISOString(),
+                        thresholdMs: 0,
+                        servedCollection: ready.publication.publication.vector.collectionName,
+                        servedPublicationId: ready.publication.id,
+                        pendingOperation: {
+                            action: activeOperation.action,
+                            generation: activeOperation.generation,
+                        },
+                    },
+                };
+            }
+
+            const freshnessDecision = await this.syncManager.assessReadFreshness(
+                ready.root.path,
+                0,
+                { preparedPublication: ready.publication },
+            );
+            const operationAfterAssessment = this.getIndexingOperationForReadiness(ready.root.path);
+            if (operationAfterAssessment && operationAfterAssessment.action !== 'sync') {
+                return {
+                    state: 'indexing',
+                    codebasePath: ready.root.path,
+                    operation: operationAfterAssessment,
+                    searchableGenerationAvailable: true,
+                };
+            }
+            if (operationAfterAssessment?.action === 'sync') {
+                return {
+                    ...ready,
+                    freshnessDecision: {
+                        mode: 'served_previous_generation',
+                        checkedAt: new Date(this.now()).toISOString(),
+                        thresholdMs: 0,
+                        servedCollection: ready.publication.publication.vector.collectionName,
+                        servedPublicationId: ready.publication.id,
+                        pendingOperation: {
+                            action: operationAfterAssessment.action,
+                            generation: operationAfterAssessment.generation,
+                        },
+                    },
+                };
+            }
+            return { ...ready, freshnessDecision };
+        };
+
         const cached = await this.getCachedPreparedRead(absolutePath, operations, true);
-        if (cached.status === 'hit') return cached.state;
+        if (cached.status === 'hit') {
+            return prepareReadableState(cached.state);
+        }
 
         const state = await this.prepareTrackedRootReadWithObservation(
             absolutePath,
             () => undefined,
             'navigation',
         );
-        if (state.state === 'ready') {
-            this.seedPreparedRead(state, false);
+        const readable = state.state === 'indexing'
+            && state.operation?.action === 'sync'
+            && state.searchableGenerationAvailable
+            && state.searchableRead
+            ? state.searchableRead
+            : state;
+        if (readable.state !== 'ready') {
+            return readable;
         }
-        return state;
+
+        const prepared = await prepareReadableState(readable);
+        if (prepared.state === 'ready') {
+            this.seedPreparedRead(prepared, false);
+        }
+        return prepared;
     }
 
     private async prepareSymbolContextSnapshot(input: {
@@ -1012,7 +1084,7 @@ export class ToolHandlers {
             ),
             acquirePublicationLease: (prepared) => (
                 prepared.state === 'ready'
-                    ? this.acquirePublicationLease(prepared.root.path)
+                    ? this.acquirePublicationLease(prepared.root.path, prepared.publication.id)
                     : undefined
             ),
             isLeaseAdmitted: (prepared, lease) => (
@@ -1304,20 +1376,6 @@ export class ToolHandlers {
 
     private hasSearchableGenerationForReadiness(codebasePath: string): boolean {
         return this.context.getCurrentPublication(codebasePath) !== null;
-    }
-
-    private async waitForSearchableSync(codebasePath: string, timeoutMs: number): Promise<boolean> {
-        if (this.context.getCurrentPublication(codebasePath)) return true;
-        const deadline = Date.now() + Math.max(0, Math.trunc(timeoutMs));
-        for (;;) {
-            const activity = this.mutationRuntime.getActiveMutation(codebasePath);
-            if (activity?.action !== "sync" || Date.now() >= deadline) return false;
-            await new Promise((resolve) => setTimeout(
-                resolve,
-                Math.min(100, Math.max(1, deadline - Date.now())),
-            ));
-            if (this.context.getCurrentPublication(codebasePath)) return true;
-        }
     }
 
     private buildManageActionBlockedMessage(codebasePath: string, action: RuntimeOwnerMutationAction): string {

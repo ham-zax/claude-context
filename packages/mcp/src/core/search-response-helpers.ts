@@ -108,6 +108,15 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             action: "Use the returned vector results with source verification, or run manage_index sync before relying on current-worktree freshness.",
         };
     }
+    if (code === WARNING_CODES.SOURCE_CHANGES_PENDING) {
+        return {
+            code,
+            severity: "caution",
+            blocksUse: false,
+            message: "Satori is serving a proven Publication while current-source changes are known or a synchronization is still pending.",
+            action: "Use Publication-backed evidence as historical index state and verify current source directly when current-worktree parity matters.",
+        };
+    }
     if (code === WARNING_CODES.FILTER_MUST_UNSATISFIED) {
         return {
             code,

@@ -379,16 +379,9 @@ export class ToolResponseBuilders {
             case "reconciled_ignore_change":
             case "skipped_mutation_in_progress":
             case "served_previous_generation":
-                return null;
-
             case "skipped_source_checkpoint_unavailable":
-                return this.buildRequiresReindexPayload(
-                    codebasePath,
-                    freshnessDecision.errorMessage
-                        ? `Search blocked because the source checkpoint could not be verified (${freshnessDecision.errorMessage}).`
-                        : "Search blocked because the source checkpoint could not be verified.",
-                    searchContext,
-                ) as unknown as SearchResponseEnvelope;
+            case "read_only":
+                return null;
 
             default: {
                 const exhaustive: never = freshnessDecision.mode;

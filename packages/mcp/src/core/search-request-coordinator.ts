@@ -386,8 +386,8 @@ type CompletionProbeDebugHint = {
 export interface SearchReadinessCollaborator {
     touchWatchedCodebaseBestEffort(codebasePath: string): Promise<void>;
 
-    ensureFreshness(
-        ...args: Parameters<SyncManager['ensureFreshness']>
+    assessReadFreshness(
+        ...args: Parameters<SyncManager['assessReadFreshness']>
     ): Promise<FreshnessDecision>;
     getPreparedReadDiagnostics?(codebasePath: string): PreparedReadWatcherDiagnostics;
 
@@ -416,8 +416,6 @@ export interface SearchReadinessCollaborator {
         codebasePath: string,
         options?: { forceRefresh?: boolean },
     ): { available: boolean; files: Set<string> };
-
-    waitForSearchableSync(codebasePath: string, timeoutMs: number): Promise<boolean>;
 
     getTrackedRootReadiness(): TrackedRootReadiness;
 
@@ -960,7 +958,7 @@ export class SearchRequestCoordinator {
                     );
                 },
                 getIndexingOperation: (codebasePath) => this.readiness.getIndexingOperationForReadiness(codebasePath),
-                ensureSearchFreshness: (effectiveRoot, preparedRead) => this.measureSearchPhase(
+                assessSearchFreshness: (effectiveRoot, preparedRead) => this.measureSearchPhase(
                     phaseTimings,
                     'ensureFreshness',
                     async () => {
@@ -970,7 +968,7 @@ export class SearchRequestCoordinator {
                         }
                         const effectiveWatcherObservation = this.readiness.getWatcherObservation(effectiveRoot);
                         const fullSourceComparisonRequired = effectiveWatcherObservation.coverage !== 'ready'
-                            || effectiveWatcherObservation.coverageGapSinceEpoch !== undefined;
+                            || effectiveWatcherObservation.pending;
                         const changedFilesState = this.readiness.getChangedFilesForCodebase(
                             effectiveRoot,
                             { forceRefresh: fullSourceComparisonRequired },
@@ -982,7 +980,7 @@ export class SearchRequestCoordinator {
                             && exactSourceComparisonRequired
                             ? Array.from(changedFilesState.files).sort()
                             : undefined;
-                        const decision = await this.readiness.ensureFreshness(
+                        const decision = await this.readiness.assessReadFreshness(
                             effectiveRoot,
                             exactSourceComparisonRequired || fullSourceComparisonRequired
                                 ? 0
@@ -994,7 +992,7 @@ export class SearchRequestCoordinator {
                                 ...(exactSourceComparisonPaths
                                     ? { exactSourceComparisonPaths }
                                     : {}),
-                                ...(fullSourceComparisonRequired && !exactSourceComparisonRequired
+                                ...(fullSourceComparisonRequired
                                     ? { fullSourceComparison: true }
                                     : {}),
                                 ...(debugMode === 'freshness' || debugMode === 'full'
@@ -1067,10 +1065,6 @@ export class SearchRequestCoordinator {
                 buildNotReadySearchPayload: (codebasePath, searchContext) => this.buildNotReadySearchPayload(
                     codebasePath,
                     searchContext
-                ),
-                waitForSearchableSync: (codebasePath, timeoutMs) => this.readiness.waitForSearchableSync(
-                    codebasePath,
-                    timeoutMs
                 ),
                 buildFreshnessBlockedSearchPayload: (codebasePath, freshnessDecision, searchContext) => this.buildFreshnessBlockedSearchPayload(
                     codebasePath,

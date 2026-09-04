@@ -996,6 +996,7 @@ export interface FileOutlineResponseEnvelope {
     outline: { symbols: FileOutlineSymbolResult[] } | null;
     hasMore: boolean;
     warnings?: string[];
+    freshnessDecision?: FreshnessDecision;
     message?: string;
     hints?: Record<string, unknown>;
     indexingFailure?: IndexingFailureMetadata;
