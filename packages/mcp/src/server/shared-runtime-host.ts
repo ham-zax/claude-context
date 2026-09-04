@@ -382,19 +382,19 @@ export class SharedRuntimeSocketHost {
         if (activity.sessions > 0 || activity.operations > 0) return;
         this.idleTimer = setTimeout(() => {
             this.idleTimer = null;
-            void this.shutdown();
+            void this.shutdown({ onlyIfIdle: true });
         }, this.idleMs);
         this.idleTimer.unref?.();
     }
 
-    async shutdown(): Promise<void> {
+    async shutdown(options: { onlyIfIdle?: boolean } = {}): Promise<void> {
         if (this.closing) return;
         this.closing = true;
         this.cancelIdleShutdown();
 
         const lock = await acquireLifecycleLock(this.paths.lockPath);
         try {
-            if (this.runtimeHost.getActivity().operations > 0) {
+            if (options.onlyIfIdle && this.runtimeHost.getActivity().operations > 0) {
                 this.closing = false;
                 this.scheduleIdleShutdown();
                 return;

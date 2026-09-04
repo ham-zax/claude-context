@@ -365,6 +365,7 @@ export class ToolHandlers {
         options?: {
             readFileMaxBytes?: number;
             collectPublicationGarbageAfterSync?: (codebasePath: string) => Promise<string[]>;
+            ownDetachedSyncCompletion?: (completion: Promise<void>) => void;
         },
     ) {
         this.context = context;
@@ -538,6 +539,7 @@ export class ToolHandlers {
             buildSyncHint: this.buildSyncHint.bind(this),
             collectPublicationGarbageAfterSync: options?.collectPublicationGarbageAfterSync
                 ?? ((codebasePath) => this.context.collectPublicationGarbage(codebasePath)),
+            ownDetachedSyncCompletion: options?.ownDetachedSyncCompletion ?? (() => undefined),
             manageVectorBackendResponse: this.toolResponseBuilders.manageVectorBackendResponse.bind(this.toolResponseBuilders),
             getLiveOwnersSummary: async () => {
                 if (!this.runtimeOwnerGate || typeof this.runtimeOwnerGate.getLiveOwnersSummary !== "function") {

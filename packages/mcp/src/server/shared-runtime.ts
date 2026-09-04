@@ -189,7 +189,9 @@ export class SharedRuntimeHost {
     private readonly watchSyncEnabled: boolean;
     private activeSessions = 0;
     private activeOperations = 0;
+    private readonly detachedSyncCompletions = new Set<Promise<void>>();
     private shutdownStarted = false;
+    private shutdownPromise: Promise<void> | null = null;
     private readonly activityListeners = new Set<() => void>();
 
     constructor(
@@ -292,6 +294,7 @@ export class SharedRuntimeHost {
                     }
                     return providerContext.context.collectPublicationGarbage(codebasePath);
                 },
+                ownDetachedSyncCompletion: (completion) => this.ownDetachedSyncCompletion(completion),
             },
         );
         const providerRuntime = new SessionProviderRuntime(
@@ -340,10 +343,32 @@ export class SharedRuntimeHost {
         this.notifyActivityChanged();
     }
 
+    private ownDetachedSyncCompletion(completion: Promise<void>): void {
+        if (this.detachedSyncCompletions.has(completion)) return;
+        this.detachedSyncCompletions.add(completion);
+        this.notifyActivityChanged();
+        void completion.then(
+            () => this.releaseDetachedSyncCompletion(completion),
+            () => this.releaseDetachedSyncCompletion(completion),
+        );
+    }
+
+    private releaseDetachedSyncCompletion(completion: Promise<void>): void {
+        if (!this.detachedSyncCompletions.delete(completion)) return;
+        this.notifyActivityChanged();
+    }
+
+    private async drainDetachedSyncCompletions(): Promise<void> {
+        while (this.detachedSyncCompletions.size > 0) {
+            await Promise.allSettled([...this.detachedSyncCompletions]);
+        }
+    }
+
     getActivity(): Readonly<{ sessions: number; operations: number }> {
         return Object.freeze({
             sessions: this.activeSessions,
             operations: this.activeOperations
+                + this.detachedSyncCompletions.size
                 + this.providerRuntime.getActiveLifecycleOperationCount(),
         });
     }
@@ -364,13 +389,17 @@ export class SharedRuntimeHost {
     }
 
     async shutdown(): Promise<void> {
-        if (this.shutdownStarted) return;
+        if (this.shutdownPromise) return this.shutdownPromise;
         this.shutdownStarted = true;
-        await this.localSyncManager.stopAndDrainLifecycle();
-        await this.localContext.dispose?.();
-        await this.providerRuntime.shutdown();
-        this.searchContinuationPool.clear();
-        this.runtimeOwnerRegistry.unregisterCurrentOwner();
+        this.shutdownPromise = (async () => {
+            await this.localSyncManager.stopAndDrainLifecycle();
+            await this.drainDetachedSyncCompletions();
+            await this.localContext.dispose?.();
+            await this.providerRuntime.shutdown();
+            this.searchContinuationPool.clear();
+            this.runtimeOwnerRegistry.unregisterCurrentOwner();
+        })();
+        return this.shutdownPromise;
     }
 }
 

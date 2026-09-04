@@ -103,6 +103,7 @@ type ManageMaintenanceHandlersHost = {
     buildManageRequiresReindexHints(codebasePath: string): Record<string, unknown>;
     buildSyncHint(codebasePath: string): Record<string, unknown>;
     collectPublicationGarbageAfterSync(codebasePath: string): Promise<string[]>;
+    ownDetachedSyncCompletion(completion: Promise<void>): void;
     buildStaleLocalHint(codebasePath: string, reason: string): Record<string, unknown>;
     buildStaleLocalMessage(codebasePath: string, requestedPath: string, reason: string): string;
     buildReindexHint(codebasePath: string): Record<string, unknown>;
@@ -929,6 +930,7 @@ export class ManageMaintenanceHandlers {
                 { signal: requestSignal },
             );
 
+            this.host.ownDetachedSyncCompletion(mutation.completion);
             void mutation.completion.catch((error: unknown) => {
                 console.error(`[SYNC] Detached supervised sync rejected for '${absolutePath}':`, error);
             });
