@@ -362,7 +362,10 @@ export class ToolHandlers {
         navigationStore: JsonNavigationStore = new JsonNavigationStore(),
         private readonly runtimeOwnerGate: RuntimeOwnerMutationGate | null = null,
         searchContinuationCoordinator?: SearchContinuationCoordinator,
-        options?: { readFileMaxBytes?: number },
+        options?: {
+            readFileMaxBytes?: number;
+            collectPublicationGarbageAfterSync?: (codebasePath: string) => Promise<string[]>;
+        },
     ) {
         this.context = context;
         this.syncManager = syncManager;
@@ -533,6 +536,8 @@ export class ToolHandlers {
             buildStaleLocalMessage: this.buildStaleLocalMessage.bind(this),
             buildReindexHint: this.buildReindexHint.bind(this),
             buildSyncHint: this.buildSyncHint.bind(this),
+            collectPublicationGarbageAfterSync: options?.collectPublicationGarbageAfterSync
+                ?? ((codebasePath) => this.context.collectPublicationGarbage(codebasePath)),
             manageVectorBackendResponse: this.toolResponseBuilders.manageVectorBackendResponse.bind(this.toolResponseBuilders),
             getLiveOwnersSummary: async () => {
                 if (!this.runtimeOwnerGate || typeof this.runtimeOwnerGate.getLiveOwnersSummary !== "function") {

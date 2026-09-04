@@ -102,6 +102,7 @@ type ManageMaintenanceHandlersHost = {
     buildCompatibilityStatusLines(codebasePath: string): string;
     buildManageRequiresReindexHints(codebasePath: string): Record<string, unknown>;
     buildSyncHint(codebasePath: string): Record<string, unknown>;
+    collectPublicationGarbageAfterSync(codebasePath: string): Promise<string[]>;
     buildStaleLocalHint(codebasePath: string, reason: string): Record<string, unknown>;
     buildStaleLocalMessage(codebasePath: string, requestedPath: string, reason: string): string;
     buildReindexHint(codebasePath: string): Record<string, unknown>;
@@ -886,6 +887,9 @@ export class ManageMaintenanceHandlers {
                         completion: (async () => {
                             try {
                                 await worker.completion;
+                                if (!this.host.mutationRuntime.isCurrent(absolutePath)) return;
+
+                                await this.host.collectPublicationGarbageAfterSync(absolutePath);
                                 if (!this.host.mutationRuntime.isCurrent(absolutePath)) return;
 
                                 const currentOperation = this.host.mutationRuntime.getCurrentOperation(absolutePath);

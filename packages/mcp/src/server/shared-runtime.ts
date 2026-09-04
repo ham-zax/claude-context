@@ -283,7 +283,16 @@ export class SharedRuntimeHost {
             undefined,
             this.runtimeOwnerRegistry,
             continuationCoordinator,
-            { readFileMaxBytes: this.readFileMaxBytes },
+            {
+                readFileMaxBytes: this.readFileMaxBytes,
+                collectPublicationGarbageAfterSync: async (codebasePath) => {
+                    const providerContext = await this.providerRuntime.requireToolContext("vector_only");
+                    if (isMissingProviderConfigIssue(providerContext)) {
+                        throw new Error(providerContext.message);
+                    }
+                    return providerContext.context.collectPublicationGarbage(codebasePath);
+                },
+            },
         );
         const providerRuntime = new SessionProviderRuntime(
             this.providerRuntime,
