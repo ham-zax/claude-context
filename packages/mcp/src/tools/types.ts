@@ -46,8 +46,13 @@ export interface ToolContext {
     workspacePolicy: SessionWorkspacePolicy;
     /** Optional: live multi-runtime owner diagnostics for list_codebases / status. */
     runtimeOwnerGate?: RuntimeOwnerMutationGate | null;
+    /** Exact MCP request cancellation scope; mutation handlers must opt in explicitly. */
+    requestSignal?: AbortSignal;
     providerRuntime?: {
-        requireToolContext(operation: ProviderBackedOperation): Promise<ToolContext | MissingProviderConfigIssue>;
+        requireToolContext(
+            operation: ProviderBackedOperation,
+            request?: { signal?: AbortSignal },
+        ): Promise<ToolContext | MissingProviderConfigIssue>;
     };
 }
 

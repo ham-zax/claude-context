@@ -115,13 +115,22 @@ export const manageIndexTool: McpTool = {
         let statusProviderIssue: MissingProviderConfigIssue | null = null;
         try {
             if (input.action === "status" && ctx.providerRuntime) {
-                const preferredContext = await ctx.providerRuntime.requireToolContext("embedding_vector");
+                const preferredContext = await ctx.providerRuntime.requireToolContext(
+                    "embedding_vector",
+                    { signal: ctx.requestSignal },
+                );
                 executionContext = isMissingProviderConfigIssue(preferredContext)
-                    ? await ctx.providerRuntime.requireToolContext("vector_only")
+                    ? await ctx.providerRuntime.requireToolContext(
+                        "vector_only",
+                        { signal: ctx.requestSignal },
+                    )
                     : preferredContext;
             } else {
                 executionContext = providerOperation && ctx.providerRuntime
-                    ? await ctx.providerRuntime.requireToolContext(providerOperation)
+                    ? await ctx.providerRuntime.requireToolContext(
+                        providerOperation,
+                        { signal: ctx.requestSignal },
+                    )
                     : ctx;
             }
         } catch (error) {

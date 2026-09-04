@@ -9,11 +9,19 @@ export type {
     SharedPublicationRuntime,
 } from './generation/publication-store';
 export {
+    RootMutationCancelledError,
     RootMutationInProgressError,
     RootMutationRuntime,
     formatRootMutationBlockedMessage,
     type RootMutationActivity,
+    type RootMutationExecution,
+    type RootMutationExecutionOptions,
+    type RootMutationExecutor,
+    type RootMutationStart,
 } from './generation/root-mutation-runtime';
+export {
+    MutationExecutorStillActiveError,
+} from './generation/root-mutation-coordinator';
 export type {
     MutationOperationPhase,
     RootMutationOperation,

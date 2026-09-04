@@ -115,6 +115,7 @@ class SessionProviderRuntime {
 
     async requireToolContext(
         operation: ProviderBackedOperation,
+        request: { signal?: AbortSignal } = {},
     ): Promise<ToolContext | MissingProviderConfigIssue> {
         const shared = await this.providerRuntime.requireToolContext(operation);
         if (isMissingProviderConfigIssue(shared)) {
@@ -123,7 +124,9 @@ class SessionProviderRuntime {
 
         const existing = this.contexts.get(shared);
         if (existing) {
-            return existing;
+            return request.signal
+                ? { ...existing, requestSignal: request.signal }
+                : existing;
         }
 
         const toolHandlers = new ToolHandlers(
@@ -152,7 +155,9 @@ class SessionProviderRuntime {
         };
         this.contexts.set(shared, sessionContext);
         this.handlers.add(toolHandlers);
-        return sessionContext;
+        return request.signal
+            ? { ...sessionContext, requestSignal: request.signal }
+            : sessionContext;
     }
 
     release(): void {
@@ -403,7 +408,7 @@ export class McpSession {
             tools: getMcpToolList(this.resources.toolContext),
         }));
 
-        this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+        this.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
             const { name, arguments: args } = request.params;
             const tool = toolRegistry[name];
             if (!tool) {
@@ -428,9 +433,13 @@ export class McpSession {
             this.activeToolCalls += 1;
             this.host.beginOperation();
             try {
+                const requestToolContext: ToolContext = {
+                    ...this.resources.toolContext,
+                    requestSignal: extra.signal,
+                };
                 return await withSourceMeasurementOperation(
                     { operation: name },
-                    () => tool.execute(args || {}, this.resources.toolContext),
+                    () => tool.execute(args || {}, requestToolContext),
                 ) as ToolResponse;
             } finally {
                 this.activeToolCalls -= 1;

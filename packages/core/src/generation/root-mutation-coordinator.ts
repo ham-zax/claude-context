@@ -4,7 +4,11 @@ import * as os from 'os';
 import * as path from 'path';
 
 export type MutationLeaseAction = 'create' | 'reindex' | 'sync' | 'clear' | 'gc';
-export type MutationOperationPhase = 'accepted' | 'preflight' | 'scanning' | 'writing' | 'proving' | 'publishing' | 'completed' | 'failed' | 'blocked';
+export type MutationOperationPhase = 'accepted' | 'preflight' | 'scanning' | 'writing' | 'proving' | 'publishing' | 'cancelling' | 'cancelled' | 'completed' | 'failed' | 'blocked';
+
+export function isTerminalMutationOperationPhase(phase: MutationOperationPhase): boolean {
+    return phase === 'completed' || phase === 'failed' || phase === 'blocked' || phase === 'cancelled';
+}
 
 export interface RootMutationOperation {
     id: string;
@@ -14,8 +18,12 @@ export interface RootMutationOperation {
     acceptedAt: string;
     phase: MutationOperationPhase;
     updatedAt: string;
+    heartbeatAt?: string;
+    progressAt?: string;
     progress?: number;
     error?: string;
+    cancelRequestedAt?: string;
+    cancelReason?: string;
 }
 
 export interface MutationLeaseProcessSnapshot {
@@ -36,6 +44,9 @@ export interface RootMutationLease {
     pid: number;
     processStartTime?: string;
     acquiredAt: string;
+    executorPid?: number;
+    executorProcessStartTime?: string;
+    executorProcessGroupId?: number;
 }
 
 export type MutationLeaseAcquireResult =
@@ -76,6 +87,18 @@ function processExists(pid: number): boolean {
     if (!Number.isSafeInteger(pid) || pid <= 0) return false;
     try {
         process.kill(pid, 0);
+        return true;
+    } catch (error) {
+        return (error as NodeJS.ErrnoException).code === 'EPERM';
+    }
+}
+
+function processGroupExists(processGroupId: number): boolean {
+    if (process.platform !== 'linux' || !Number.isSafeInteger(processGroupId) || processGroupId <= 0) {
+        return false;
+    }
+    try {
+        process.kill(-processGroupId, 0);
         return true;
     } catch (error) {
         return (error as NodeJS.ErrnoException).code === 'EPERM';
@@ -138,6 +161,13 @@ export class MutationLeaseLostError extends Error {
     constructor(lease: RootMutationLease) {
         super(`Mutation lease generation ${lease.generation} is no longer current for '${lease.canonicalRoot}'.`);
         this.name = 'MutationLeaseLostError';
+    }
+}
+
+export class MutationExecutorStillActiveError extends Error {
+    constructor(lease: RootMutationLease) {
+        super(`Mutation executor is still live for operation '${lease.operationId}' on '${lease.canonicalRoot}'.`);
+        this.name = 'MutationExecutorStillActiveError';
     }
 }
 
@@ -204,6 +234,8 @@ export class MutationLeaseCoordinator {
                 acceptedAt: lease.acquiredAt,
                 phase: 'accepted',
                 updatedAt: lease.acquiredAt,
+                heartbeatAt: lease.acquiredAt,
+                progressAt: lease.acquiredAt,
             });
             return { acquired: true, lease };
         });
@@ -283,23 +315,118 @@ export class MutationLeaseCoordinator {
             if (!sameLease(state.lease, lease)) {
                 throw new MutationLeaseLostError(lease);
             }
-            const current = this.operationsByRoot.get(lease.canonicalRoot);
-            if (!current || current.id !== lease.operationId || current.generation !== lease.generation) {
-                throw new Error(`Live operation state is unavailable for mutation '${lease.operationId}'.`);
-            }
+            const current = this.requireOperationForLease(lease);
             const progress = update.progress;
             if (progress !== undefined && (!Number.isFinite(progress) || progress < 0 || progress > 100)) {
                 throw new Error(`Invalid mutation operation progress '${progress}'.`);
             }
+            const now = new Date(this.now()).toISOString();
+            const phaseAdvanced = phase !== current.phase
+                && phase !== 'cancelling'
+                && phase !== 'cancelled'
+                && phase !== 'failed'
+                && phase !== 'blocked';
+            const madeProgress = phaseAdvanced
+                || (progress !== undefined && progress !== current.progress);
             const next: RootMutationOperation = {
                 ...current,
                 phase,
-                updatedAt: new Date(this.now()).toISOString(),
+                updatedAt: now,
+                heartbeatAt: now,
+                progressAt: madeProgress ? now : (current.progressAt ?? current.updatedAt),
                 ...(progress !== undefined ? { progress } : {}),
                 ...(update.error !== undefined ? { error: update.error } : {}),
             };
             this.operationsByRoot.set(lease.canonicalRoot, next);
             return { ...next };
+        });
+    }
+
+    public heartbeatOperation(lease: RootMutationLease): RootMutationOperation {
+        return this.withRootLock(lease.canonicalRoot, () => {
+            const state = this.readState(lease.canonicalRoot);
+            if (!sameLease(state.lease, lease)) {
+                throw new MutationLeaseLostError(lease);
+            }
+            const current = this.requireOperationForLease(lease);
+            const now = new Date(this.now()).toISOString();
+            const next = {
+                ...current,
+                updatedAt: now,
+                heartbeatAt: now,
+            };
+            this.operationsByRoot.set(lease.canonicalRoot, next);
+            return { ...next };
+        });
+    }
+
+    public requestOperationCancellation(lease: RootMutationLease, reason?: string): RootMutationOperation {
+        return this.withRootLock(lease.canonicalRoot, () => {
+            const state = this.readState(lease.canonicalRoot);
+            if (!sameLease(state.lease, lease)) {
+                throw new MutationLeaseLostError(lease);
+            }
+            const current = this.requireOperationForLease(lease);
+            if (isTerminalMutationOperationPhase(current.phase)) {
+                return { ...current };
+            }
+            const now = new Date(this.now()).toISOString();
+            const next: RootMutationOperation = {
+                ...current,
+                phase: 'cancelling',
+                updatedAt: now,
+                heartbeatAt: now,
+                progressAt: current.progressAt ?? current.updatedAt,
+                cancelRequestedAt: current.cancelRequestedAt ?? now,
+                ...(reason !== undefined ? { cancelReason: reason } : {}),
+            };
+            this.operationsByRoot.set(lease.canonicalRoot, next);
+            return { ...next };
+        });
+    }
+
+    public bindExecutor(
+        lease: RootMutationLease,
+        executor: { pid: number; processGroupId?: number },
+    ): RootMutationLease {
+        if (!Number.isSafeInteger(executor.pid) || executor.pid <= 0) {
+            throw new Error(`Invalid mutation executor pid '${executor.pid}'.`);
+        }
+        if (
+            executor.processGroupId !== undefined
+            && (!Number.isSafeInteger(executor.processGroupId) || executor.processGroupId <= 0)
+        ) {
+            throw new Error(`Invalid mutation executor process group '${executor.processGroupId}'.`);
+        }
+        const snapshot = this.processInspector.inspect(executor.pid);
+        if (!snapshot) {
+            throw new Error(`Mutation executor pid ${executor.pid} is not live.`);
+        }
+        return this.withRootLock(lease.canonicalRoot, () => {
+            const state = this.readState(lease.canonicalRoot);
+            if (!sameLease(state.lease, lease) || !state.lease) {
+                throw new MutationLeaseLostError(lease);
+            }
+            if (
+                state.lease.executorPid !== undefined
+                && state.lease.executorPid !== executor.pid
+                && this.isExecutorLive(state.lease)
+            ) {
+                throw new MutationExecutorStillActiveError(state.lease);
+            }
+            const nextLease: RootMutationLease = {
+                ...state.lease,
+                executorPid: executor.pid,
+                ...(snapshot.processStartTime ? { executorProcessStartTime: snapshot.processStartTime } : {}),
+                ...(executor.processGroupId !== undefined ? { executorProcessGroupId: executor.processGroupId } : {}),
+            };
+            this.writeState({
+                formatVersion: 'v1',
+                canonicalRoot: state.canonicalRoot,
+                generation: state.generation,
+                lease: nextLease,
+            });
+            return { ...nextLease };
         });
     }
 
@@ -339,6 +466,9 @@ export class MutationLeaseCoordinator {
             if (!sameLease(state.lease, lease)) {
                 return false;
             }
+            if (state.lease && this.isExecutorLive(state.lease)) {
+                throw new MutationExecutorStillActiveError(state.lease);
+            }
             this.writeState({
                 formatVersion: 'v1',
                 canonicalRoot: state.canonicalRoot,
@@ -352,6 +482,7 @@ export class MutationLeaseCoordinator {
                 && operation.phase !== 'completed'
                 && operation.phase !== 'failed'
                 && operation.phase !== 'blocked'
+                && operation.phase !== 'cancelled'
             ) {
                 this.operationsByRoot.delete(lease.canonicalRoot);
             }
@@ -361,15 +492,40 @@ export class MutationLeaseCoordinator {
 
     private isOwnerLive(lease: RootMutationLease): boolean {
         const current = this.processInspector.inspect(lease.pid);
-        if (!current) return false;
-        if (
-            lease.processStartTime
-            && current.processStartTime
-            && lease.processStartTime !== current.processStartTime
-        ) {
-            return false;
+        if (current && (
+            !lease.processStartTime
+            || !current.processStartTime
+            || lease.processStartTime === current.processStartTime
+        )) {
+            return true;
         }
-        return true;
+        return this.isExecutorLive(lease);
+    }
+
+    private isExecutorLive(lease: RootMutationLease): boolean {
+        if (lease.executorPid !== undefined) {
+            const current = this.processInspector.inspect(lease.executorPid);
+            if (current) {
+                if (
+                    lease.executorProcessStartTime
+                    && current.processStartTime
+                    && lease.executorProcessStartTime !== current.processStartTime
+                ) {
+                    return false;
+                }
+                return true;
+            }
+        }
+        return lease.executorProcessGroupId !== undefined
+            && processGroupExists(lease.executorProcessGroupId);
+    }
+
+    private requireOperationForLease(lease: RootMutationLease): RootMutationOperation {
+        const operation = this.operationsByRoot.get(lease.canonicalRoot);
+        if (!operation || operation.id !== lease.operationId || operation.generation !== lease.generation) {
+            throw new Error(`Live operation state is unavailable for mutation '${lease.operationId}'.`);
+        }
+        return operation;
     }
 
     private statePath(canonicalRoot: string): string {
@@ -421,7 +577,18 @@ export class MutationLeaseCoordinator {
             && Number.isSafeInteger(value.pid)
             && value.pid > 0
             && (value.processStartTime === undefined || typeof value.processStartTime === 'string')
-            && typeof value.acquiredAt === 'string';
+            && typeof value.acquiredAt === 'string'
+            && (value.executorPid === undefined || (
+                typeof value.executorPid === 'number'
+                && Number.isSafeInteger(value.executorPid)
+                && value.executorPid > 0
+            ))
+            && (value.executorProcessStartTime === undefined || typeof value.executorProcessStartTime === 'string')
+            && (value.executorProcessGroupId === undefined || (
+                typeof value.executorProcessGroupId === 'number'
+                && Number.isSafeInteger(value.executorProcessGroupId)
+                && value.executorProcessGroupId > 0
+            ));
     }
 
     private fsyncDirectory(directoryPath: string): void {
