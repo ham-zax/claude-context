@@ -500,12 +500,10 @@ test("Scenario F: state-root isolation scopes mutation ownership to the backend 
     }
 });
 
-test("Scenario G: cold-start joins a same-root sync once; reindex stays bounded not_ready", async () => {
+test("Scenario G: readable Publication is served during same-root sync; reindex stays bounded not_ready", async () => {
     const codebasePath = fs.mkdtempSync(path.join(os.tmpdir(), "satori-e2e-coldstart-"));
     try {
-        let phase: "indexing-sync" | "ready" = "indexing-sync";
-        let syncJoins = 0;
-        const readyState = (): TrackedRootReadinessState => ({
+        const readyState = (): Extract<TrackedRootReadinessState, { state: "ready" }> => ({
             state: "ready",
             root: { path: codebasePath, info: {} as never },
             navigationAuthorityMode: "canonical_v4",
@@ -526,26 +524,19 @@ test("Scenario G: cold-start joins a same-root sync once; reindex stays bounded 
                     throw new Error("unexpected missing_collection state");
                 },
             },
-            prepareInitialTrackedRootRead: async () => (
-                phase === "indexing-sync"
-                    ? {
-                        state: "indexing",
-                        codebasePath,
-                        operation: { action: "sync", phase: "vector", generation: 2 },
-                        searchableGenerationAvailable: true,
-                    } satisfies TrackedRootReadinessState
-                    : readyState()
-            ),
-            waitForSearchableSync: async () => {
-                syncJoins += 1;
-                phase = "ready";
-                return true;
-            },
+            prepareInitialTrackedRootRead: async () => ({
+                state: "indexing",
+                codebasePath,
+                operation: { action: "sync", phase: "vector", generation: 2 },
+                searchableGenerationAvailable: true,
+                searchableRead: readyState(),
+            } satisfies TrackedRootReadinessState),
             preparePostFreshnessTrackedRootRead: async () => readyState(),
-            ensureSearchFreshness: async () => ({
-                mode: "skipped_recent",
+            assessSearchFreshness: async () => ({
+                mode: "read_only",
                 checkedAt: new Date(0).toISOString(),
                 thresholdMs: 5000,
+                sourceFreshness: { state: "verified", reason: "watcher_continuity" },
             }) satisfies FreshnessDecision,
             noteFreshnessMode: () => {},
             buildInvalidSearchRequestPayload: () => {
@@ -582,16 +573,16 @@ test("Scenario G: cold-start joins a same-root sync once; reindex stays bounded 
             limit: 3,
         };
 
-        // A transient same-root sync is joined exactly once, then search proceeds.
+        // A same-root sync serves the already-readable Publication without waiting for mutation.
         const joined = await runSearchFrontDoor(frontDoorInput, host);
         assert.equal(joined.kind, "ready");
-        assert.equal(syncJoins, 1);
         if (joined.kind !== "ready") return;
         assert.equal(joined.effectiveRoot, codebasePath);
+        assert.equal(joined.freshnessDecision.mode, "served_previous_generation");
+        assert.equal(joined.freshnessDecision.servedPublicationId, "publication-1");
+        assert.deepEqual(joined.freshnessDecision.pendingOperation, { action: "sync", generation: 2 });
 
-        // A reindex never joins search; it stays not_ready with the bounded retry.
-        phase = "indexing-sync";
-        syncJoins = 0;
+        // A reindex stays not_ready with the bounded retry.
         host.prepareInitialTrackedRootRead = async () => ({
             state: "indexing",
             codebasePath,
@@ -600,7 +591,6 @@ test("Scenario G: cold-start joins a same-root sync once; reindex stays bounded 
         });
         const blocked = await runSearchFrontDoor(frontDoorInput, host);
         assert.equal(blocked.kind, "blocked");
-        assert.equal(syncJoins, 0);
         if (blocked.kind !== "blocked") return;
         assert.equal(blocked.payload.status, "not_ready");
         assert.equal(blocked.payload.retryAfterMs, DEFAULT_MANAGE_RETRY_AFTER_MS);

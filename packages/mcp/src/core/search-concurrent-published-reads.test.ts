@@ -78,8 +78,8 @@ test('parallel searches execute concurrently against pinned publication during a
                 searchableRead: preparedRead,
             };
         },
-        ensureSearchFreshness: async () => {
-            throw new Error('ensureSearchFreshness should not be invoked during stale-while-sync');
+        assessSearchFreshness: async () => {
+            throw new Error('assessSearchFreshness should not be invoked during stale-while-sync');
         },
         noteFreshnessMode: () => undefined,
         buildFreshnessBlockedSearchPayload: () => null,
@@ -240,12 +240,11 @@ test('SearchRequestCoordinator preserves pinned reader A on Gen N across Gen N+1
         coordinator = new SearchRequestCoordinator({
             readiness: {
                 touchWatchedCodebaseBestEffort: async () => {},
-                ensureFreshness: async () => ({
-                    mode: currentGeneration === 'N' ? 'served_previous_generation' : 'synced',
+                assessReadFreshness: async () => ({
+                    mode: 'read_only',
                     checkedAt: new Date().toISOString(),
                     thresholdMs: 0,
-                    servedCollection: currentGeneration === 'N' ? 'col_gen_n' : undefined,
-                    servedPublicationId: currentGeneration === 'N' ? publicationN.id : undefined,
+                    sourceFreshness: { state: 'verified', reason: 'watcher_continuity' },
                 }),
                 prepareTrackedRootReadWithObservation: async (): Promise<any> => {
                     const isN = currentGeneration === 'N';
@@ -271,7 +270,6 @@ test('SearchRequestCoordinator preserves pinned reader A on Gen N across Gen N+1
                 loadRegistryValidatedRelationshipNavigation: async () => ({ relationshipReady: false }),
                 getWatcherObservation: () => ({ coverage: 'ready', available: true, snapshot: 'watch' } as any),
                 getChangedFilesForCodebase: () => ({ available: true, files: new Set() }),
-                waitForSearchableSync: async () => true,
                 getTrackedRootReadiness: () => ({} as any),
                 isPartialIndexNavigationUnavailable: () => false,
                 getIndexingOperationForReadiness: () => undefined,
@@ -465,12 +463,11 @@ test('coordinator characterization: five parallel stale reads stay pinned across
         coordinator = new SearchRequestCoordinator({
             readiness: {
                 touchWatchedCodebaseBestEffort: async () => {},
-                ensureFreshness: async () => ({
-                    mode: currentGeneration === 'N' ? 'served_previous_generation' : 'synced',
+                assessReadFreshness: async () => ({
+                    mode: 'read_only',
                     checkedAt: new Date().toISOString(),
                     thresholdMs: 0,
-                    servedCollection: currentGeneration === 'N' ? 'col_gen_n' : undefined,
-                    servedPublicationId: currentGeneration === 'N' ? publicationN.id : undefined,
+                    sourceFreshness: { state: 'verified', reason: 'watcher_continuity' },
                 }),
                 prepareTrackedRootReadWithObservation: async (): Promise<any> => {
                     const isN = currentGeneration === 'N';
@@ -496,7 +493,6 @@ test('coordinator characterization: five parallel stale reads stay pinned across
                 loadRegistryValidatedRelationshipNavigation: async () => ({ relationshipReady: false }),
                 getWatcherObservation: () => ({ coverage: 'ready', available: true, snapshot: 'watch' } as any),
                 getChangedFilesForCodebase: () => ({ available: true, files: new Set() }),
-                waitForSearchableSync: async () => true,
                 getTrackedRootReadiness: () => ({} as any),
                 isPartialIndexNavigationUnavailable: () => false,
                 getIndexingOperationForReadiness: () => undefined,
