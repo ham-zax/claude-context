@@ -1,8 +1,10 @@
 # @zokizuan/satori-mcp
 
-The MCP server for [Satori](https://github.com/ham-zax/satori): freshness-aware hybrid code search, symbol navigation, advisory call graphs, bounded source reads, and index lifecycle management.
+The MCP runtime behind [Satori](https://github.com/ham-zax/satori), the local repository-intelligence database for coding agents.
 
-Most users should install Satori through `@zokizuan/satori-cli`. The installer writes a stable local launcher and configures supported MCP clients; this package does not manage client configuration by itself.
+This package exposes the seven primitives an MCP-compatible agent uses to interrogate that database: freshness-aware hybrid search, symbol ownership, file structure, conservative relationship navigation, exact source reads, repository discovery, and index lifecycle management.
+
+Most users should install Satori through `@zokizuan/satori-cli`. The installer writes a stable local launcher, configures supported MCP clients, and selects the managed runtime. This package is the server/runtime surface, not a separate end-user product and not a client-configuration manager.
 
 ## Install
 
@@ -32,15 +34,35 @@ Do not use `npx` as the resident MCP command when the CLI installer supports you
 
 ## Workflow
 
+The product flow is intentionally narrower than the tool list:
+
+```text
+ask by intent
+  -> search_codebase
+  -> identify the owner
+  -> file_outline / call_graph when useful
+  -> read_file for exact proof
+  -> continue_search only when the frozen result contains more useful evidence
+```
+
+A first repository still needs an explicit create:
+
 ```text
 manage_index action="create" path="/absolute/path/to/repo"
+```
+
+Then a typical evidence path is:
+
+```text
 search_codebase path="/absolute/path/to/repo" query="where is auth refresh handled"
 file_outline path="/absolute/path/to/repo" file="src/auth.ts"
 call_graph path="/absolute/path/to/repo" symbolRef={...} direction="both"
 read_file path="/absolute/path/to/repo/src/auth.ts" start_line=1 end_line=160
 ```
 
-Public paths are absolute. Search is freshness-aware; exact reads are limited to indexed searchable roots. Follow `recommendedNextAction` when returned, and reindex before retrying a request that reports `requires_reindex`.
+Public paths are absolute. Search is freshness-aware; exact reads are limited to indexed searchable roots. Follow `recommendedNextAction` when returned.
+
+On managed offline runtimes, a tracked rebuild-safe incompatibility automatically starts or joins one background reindex and returns deterministic `not_ready` / `indexing` state for retry. Explicit reindex remains the operator recovery override for connected/remote runtimes, unsafe states, or a failed automatic attempt. `clear` remains explicit.
 
 ## Measured Performance
 
@@ -78,8 +100,8 @@ In a fresh two-task OpenCode comparison where both arms answered correctly, Sato
 
 | Tool | Purpose |
 |---|---|
-| `manage_index` | Create, synchronize, inspect, cancel a live supervised sync, reindex, or clear a repository index. Compatible completed Publications remain readable while source freshness is changed/unverified or a replacement sync is running; status exposes that distinction. |
-| `search_codebase` | Run freshness-aware hybrid search and return symbol-owned evidence. `limit` bounds the frozen result set across all pages; `disclosureLimit` controls only the initial grouped page. For example, `limit=20, disclosureLimit=6` returns up to six initially and freezes up to twenty. |
+| `manage_index` | Manage the repository-intelligence Publication: create the first index, synchronize source changes, inspect readiness, cancel a live supervised sync, recover with reindex, or clear index state. Managed offline runtimes automatically start or join rebuild-safe background reindex maintenance; explicit reindex remains the operator recovery override. |
+| `search_codebase` | Search the repository-intelligence Publication with semantic, lexical, and exact evidence and return owner-oriented results. `limit` bounds the frozen result set across all pages; `disclosureLimit` controls only the initial grouped page. |
 | `continue_search` | Reveal more of one frozen result set without rerunning retrieval. Use it when the initial disclosure is relevant but incomplete. A grouped envelope without continuation reports pagination.continuation="complete" for the caller-bounded frozen set only; omittedBeyondLimitGroupCount reports groups excluded by the caller limit. |
 | `call_graph` | Inspect advisory callers, callees, imports, and exports when supported. Verify inbound leads before blast-radius changes. |
 | `file_outline` | List indexed symbols and spans in one file. Exact Python functions and methods can request on-demand structural analysis. |

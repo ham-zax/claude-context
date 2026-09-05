@@ -233,7 +233,7 @@ export class ToolResponseBuilders {
             limit: searchContext.limit,
         } : {};
         const compatibility = this.host.buildCompatibilityDiagnostics(codebasePath);
-        const message = `${detailLine}The index at '${codebasePath}' is incompatible with the current runtime and must be rebuilt. Please run manage_index with {"action":"reindex","path":"${codebasePath}"}.`;
+        const message = `${detailLine}The index at '${codebasePath}' is incompatible with the current runtime and must be rebuilt. Automatic maintenance did not recover this state; use manage_index with {"action":"reindex","path":"${codebasePath}"} as the explicit recovery override.`;
         return {
             ...base,
             status: "requires_reindex",
@@ -281,7 +281,7 @@ export class ToolResponseBuilders {
             nodes: [],
             edges: [],
             notes: [],
-            message: `${detailLine}The index at '${codebasePath}' is missing or has incompatible Publication navigation and must be rebuilt. Please run manage_index with {"action":"reindex","path":"${codebasePath}"}.`,
+            message: `${detailLine}The index at '${codebasePath}' is missing or has incompatible Publication navigation and must be rebuilt. Automatic maintenance did not recover this state; use manage_index with {"action":"reindex","path":"${codebasePath}"} as the explicit recovery override.`,
             hints: {
                 reindex: this.host.buildReindexHint(codebasePath),
             },

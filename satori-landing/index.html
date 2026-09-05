@@ -5,28 +5,28 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="logo.svg" />
-  <title>Satori | Symbol + AST-Derived Intelligence for Coding Agents</title>
+  <title>Satori | Local Repository Intelligence for Coding Agents</title>
   <meta name="description"
-    content="Give any MCP-compatible coding harness exact symbols, AST-derived structure, qualified calls, bounded source, and fast local retrieval without building its own code-intelligence stack." />
+    content="Understand any codebase before you touch it. Satori turns a repository into a local intelligence database with hybrid search, symbol ownership, structure, relationships, freshness, and exact source for coding agents." />
   <meta name="keywords" content="Satori, MCP server, AI coding agents, repository intelligence, semantic code search, call graph, code navigation, Codex, Claude Code, OpenCode, LanceDB" />
   <meta name="robots" content="index,follow" />
   <link rel="canonical" href="https://satori.hamza.my.id/" />
-  <meta property="og:title" content="Satori | Symbol + AST-Derived Intelligence for Coding Agents" />
-  <meta property="og:description" content="Drop symbol navigation, AST-derived structure, qualified calls, and fast local retrieval into an MCP-compatible coding harness while keeping source retrieval local." />
+  <meta property="og:title" content="Satori | Understand Any Codebase Before You Touch It" />
+  <meta property="og:description" content="A local repository-intelligence database for coding agents: semantic + lexical retrieval, symbol ownership, structure, supported relationships, freshness, and exact source." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://satori.hamza.my.id/" />
   <meta property="og:site_name" content="Satori" />
   <meta property="og:image" content="https://satori.hamza.my.id/og-image.svg" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Satori | Symbol + AST-Derived Intelligence for Coding Agents" />
-  <meta name="twitter:description" content="Symbol + AST-derived repository intelligence for MCP coding agents: fast local retrieval, exact owners, bounded source, and qualified calls." />
+  <meta name="twitter:title" content="Satori | Local Repository Intelligence for Coding Agents" />
+  <meta name="twitter:description" content="Turn a codebase into a local intelligence database your agent can search, navigate, trace, and read precisely." />
   <meta name="twitter:image" content="https://satori.hamza.my.id/og-image.svg" />
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
       "name": "Satori",
-      "description": "Symbol and AST-derived repository intelligence for MCP-compatible coding agents: fast local retrieval, exact ownership, bounded source, qualified calls, and atomic Publications.",
+      "description": "A local repository-intelligence database for coding agents: hybrid retrieval, exact ownership, structural and relationship evidence, source freshness, bounded source, and atomic Publications.",
       "codeRepository": "https://github.com/ham-zax/satori",
       "url": "https://satori.hamza.my.id/",
       "programmingLanguage": "TypeScript",
@@ -1362,147 +1362,184 @@
         <span>Satori</span>
       </a>
       <div class="nav-links">
-        <a href="https://github.com/ham-zax/satori" target="_blank" rel="noopener noreferrer">GitHub</a>
-        <a href="architecture.html">Architecture</a>
+        <a href="#product">Product</a>
+        <a href="#use-cases">Use Cases</a>
         <a href="docs/index.html">Docs</a>
-        <a href="#contact" class="cta-contact">Contact</a>
+        <a href="architecture.html">Architecture</a>
+        <a href="https://github.com/ham-zax/satori" target="_blank" rel="noopener noreferrer" class="cta-contact">GitHub</a>
       </div>
     </nav>
 
     <main id="main">
-    <section class="hero landing-hero" id="top">
-      <div class="hero-copy-block">
-        <div class="hero-eyebrow">Drop-in code intelligence for MCP agents</div>
+    <section class="hero landing-hero product-hero" id="product">
+      <div class="hero-copy-block product-hero-copy">
+        <div class="hero-eyebrow">Repository intelligence · local by default</div>
         <h1><img class="hero-logo" src="logo-mark.svg" alt="" aria-hidden="true" />Satori</h1>
-        <h2>Give any coding harness symbols, structure, and the exact code it needs.</h2>
+        <h2>Understand any codebase before you touch it.</h2>
         <p class="hero-lede">
-          Satori adds intent search, exact symbol ownership, AST-derived structure,
-          qualified calls, and bounded source over MCP—locally—so agents spend less
-          context rediscovering the repository.
+          Satori turns a repository into a local intelligence database your coding agent can
+          search, navigate, and interrogate: semantic meaning, exact identifiers, symbol owners,
+          structure, supported relationships, freshness, and the exact source that matters.
         </p>
-      </div>
-
-      <div class="hero-product-block">
-        <div class="publication-rail" aria-label="Satori Publication request path">
-          <div class="rail-heading">
-            <span>Publication rail</span>
-            <span>one request · one Publication</span>
-          </div>
-          <div class="rail-path" role="list">
-            <div class="rail-node" role="listitem"><span>Intent</span><small>behavior</small></div>
-            <div class="rail-node" role="listitem"><span>Search</span><small>evidence</small></div>
-            <div class="rail-node" role="listitem"><span>Owner</span><small>symbol</small></div>
-            <div class="rail-node" role="listitem"><span>Graph</span><small>qualified</small></div>
-            <div class="rail-node" role="listitem"><span>Source</span><small>exact span</small></div>
-          </div>
-          <div class="rail-caption">
-            <span class="rail-live"><i aria-hidden="true"></i> coherent</span>
-            <span>Search, symbols, calls, and source stay on the same repository state.</span>
-          </div>
+        <div class="hero-proofline" aria-label="Satori product summary">
+          <span>Codex · Claude Code · OpenCode · MCP</span>
+          <span>Linux x64 / WSL2</span>
+          <span>No model API key on the offline path</span>
         </div>
 
         <div class="hero-terminal" role="group" aria-labelledby="hero-install-label">
           <div class="terminal-label">
-            <span id="hero-install-label">Install supported clients</span>
+            <span id="hero-install-label">Install Satori</span>
             <button class="copy-btn" data-copy-target="hero-install-code" aria-label="Copy install command">Copy</button>
           </div>
-          <pre id="hero-install-code"><code>npx -y @zokizuan/satori-cli@latest install</code></pre>
+          <pre id="hero-install-code"><code>npx -y @zokizuan/satori-cli@latest install
+npx -y @zokizuan/satori-cli@latest doctor</code></pre>
         </div>
 
         <div class="hero-actions">
-          <a class="btn primary" href="#quickstart">Install Satori</a>
-          <a class="btn secondary" href="docs/index.html">Read the docs</a>
+          <a class="btn primary" href="#quickstart">Try it on a repo</a>
+          <a class="btn secondary" href="docs/index.html">Learn how it works</a>
+        </div>
+      </div>
+
+      <div class="intelligence-ledger" aria-label="Repository intelligence database map">
+        <div class="ledger-topline">
+          <span>Repository intelligence ledger</span>
+          <span class="ledger-state"><i aria-hidden="true"></i> one coherent Publication</span>
         </div>
 
-        <div class="hero-social" aria-label="Community">
-          <a
-            class="product-hunt-link"
-            href="https://www.producthunt.com/products/satori-4?utm_source=satori-site"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <span class="product-hunt-mark" aria-hidden="true">P</span>
-            <span class="product-hunt-copy"><small>Featured on</small>Product Hunt</span>
-            <span class="product-hunt-arrow" aria-hidden="true">↗</span>
-          </a>
+        <div class="ledger-query">
+          <span class="ledger-label">ASK</span>
+          <strong>Where is auth refresh handled, what owns it, and what should I read first?</strong>
+        </div>
+
+        <div class="ledger-grid">
+          <div class="ledger-column ledger-repo">
+            <span class="ledger-label">REPOSITORY</span>
+            <code>src/auth/refresh.ts</code>
+            <code>src/session/store.ts</code>
+            <code>src/http/middleware.ts</code>
+            <code>config/security.ts</code>
+            <small>files · paths · checkpoints</small>
+          </div>
+
+          <div class="ledger-column ledger-intel">
+            <span class="ledger-label">INTELLIGENCE</span>
+            <div class="ledger-layer"><b>semantic</b><small>behavior by meaning</small></div>
+            <div class="ledger-layer"><b>lexical</b><small>BM25 + exact identifiers</small></div>
+            <div class="ledger-layer"><b>structure</b><small>symbols + source spans</small></div>
+            <div class="ledger-layer"><b>relations</b><small>qualified navigation evidence</small></div>
+            <div class="ledger-layer"><b>freshness</b><small>current source authority</small></div>
+          </div>
+
+          <div class="ledger-column ledger-evidence">
+            <span class="ledger-label">EVIDENCE</span>
+            <div class="ledger-result primary-result">
+              <small>OWNER · rank 1</small>
+              <strong>AuthRefreshCoordinator.refresh</strong>
+              <code>src/auth/refresh.ts:84–146</code>
+            </div>
+            <div class="ledger-result">
+              <small>NEXT</small>
+              <span>outline · callers · exact source</span>
+            </div>
+            <div class="ledger-result ledger-fresh">
+              <small>FRESHNESS</small>
+              <span>current · publication-bound</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="ledger-foot">
+          <span>Search broadly.</span>
+          <span>Resolve the owner.</span>
+          <span>Read narrowly.</span>
         </div>
       </div>
 
       <div class="trust-chips" role="list" aria-label="Satori trust signals">
-        <span class="trust-chip" role="listitem">154.543 ms warm-search p95 · 10,830 chunks</span>
-        <span class="trust-chip" role="listitem">AST-derived symbols + spans</span>
-        <span class="trust-chip" role="listitem">Massively less token waste</span>
-        <span class="trust-chip" role="listitem">Nine CALLS v0 languages</span>
-        <span class="trust-chip" role="listitem">Offline after install</span>
+        <span class="trust-chip" role="listitem">Local Potion + BM25 + LateOn + LanceDB</span>
+        <span class="trust-chip" role="listitem">Nine production navigation languages</span>
+        <span class="trust-chip" role="listitem">Exact symbol + bounded source reads</span>
+        <span class="trust-chip" role="listitem">Automatic managed-offline reindex</span>
+        <span class="trust-chip" role="listitem">Read-only source access</span>
       </div>
     </section>
 
-    <section class="section">
-      <h3>Stop making agents rediscover the repo</h3>
-      <p class="section-intro">
-        Agents can edit quickly but still waste context finding where a change belongs.
-        Search-only workflows repeatedly rebuild an incomplete or stale repository map.
+    <section class="section product-definition" id="how-it-works">
+      <div class="section-kicker">What the product actually stores</div>
+      <h3>A code map that survives the prompt.</h3>
+      <p class="section-intro wide-intro">
+        Satori is not just semantic search. One Publication binds multiple evidence layers to the
+        same repository generation, so an agent can move from a vague question to exact source
+        without reconstructing the map from scratch every time.
       </p>
-      <div class="grid">
-        <article class="card">
-          <h4>Broad context dumps</h4>
-          <p>Large files enter the prompt before the agent knows the real owner.</p>
+      <div class="capability-ledger" role="list" aria-label="Satori repository intelligence layers">
+        <article class="capability-row" role="listitem">
+          <span class="capability-index">SEARCH</span>
+          <div><strong>Semantic + lexical retrieval</strong><p>Behavior by meaning, BM25, exact paths, identifiers, configuration keys, and literal evidence.</p></div>
+          <code>find intent without losing literals</code>
         </article>
-        <article class="card">
-          <h4>Wrong owner, plausible match</h4>
-          <p>A plausible text hit may be a wrapper, helper, generated path, or fixture.</p>
+        <article class="capability-row" role="listitem">
+          <span class="capability-index">OWNERS</span>
+          <div><strong>Symbols + structural spans</strong><p>Parser-derived functions, methods, classes, file outlines, and bounded source ownership.</p></div>
+          <code>rank evidence around real owners</code>
         </article>
-        <article class="card">
-          <h4>Related paths stay hidden</h4>
-          <p>Text hits do not reveal which qualified call paths are worth following.</p>
+        <article class="capability-row" role="listitem">
+          <span class="capability-index">TRACE</span>
+          <div><strong>Supported relationships</strong><p>Qualified callers, callees, imports, and exports when the language backend can prove them.</p></div>
+          <code>advisory, conservative, fail-closed</code>
         </article>
-        <article class="card">
-          <h4>Stale confidence</h4>
-          <p>Repository drift can turn a confident indexed answer into a stale one.</p>
+        <article class="capability-row" role="listitem">
+          <span class="capability-index">TRUTH</span>
+          <div><strong>Freshness + Publication authority</strong><p>Source checkpoints, runtime compatibility, policy, navigation readiness, and atomic replacement generations.</p></div>
+          <code>know which repo state answered</code>
         </article>
       </div>
     </section>
 
-    <section class="section" id="demo">
-      <h3>One path from question to source</h3>
-      <p class="section-intro">
-        Satori turns a question into a repeatable evidence path.
+    <section class="section ask-section" id="demo">
+      <div class="section-kicker">Ask your repository</div>
+      <h3>From a human question to source evidence.</h3>
+      <p class="section-intro wide-intro">
+        The agent does not need a perfect identifier up front. Satori narrows the search in stages and keeps each stage tied to repository evidence.
       </p>
-      <div class="goal-strip" role="list" aria-label="Satori outcomes">
-        <span role="listitem"><strong>Less</strong> grep chaining</span>
-        <span role="listitem"><strong>Less</strong> tool-output context</span>
-        <span role="listitem"><strong>Fewer</strong> blind edits</span>
-        <span role="listitem"><strong>More</strong> visible evidence</span>
+      <div class="evidence-console" aria-label="Example Satori evidence journey">
+        <div class="console-question">
+          <span>QUESTION</span>
+          <strong>“Find the code that keeps a detached background mutation alive after the client disconnects.”</strong>
+        </div>
+        <div class="evidence-path">
+          <div class="evidence-step">
+            <span>SEARCH</span>
+            <strong>shared runtime · lifecycle · detached mutation</strong>
+            <small>semantic + lexical evidence</small>
+          </div>
+          <div class="evidence-step selected-step">
+            <span>OWNER</span>
+            <strong>SharedRuntimeHost.ownDetachedMutationCompletion</strong>
+            <small>symbol-owned result</small>
+          </div>
+          <div class="evidence-step">
+            <span>TRACE</span>
+            <strong>host activity → shutdown drain</strong>
+            <small>supported relationship context</small>
+          </div>
+          <div class="evidence-step">
+            <span>SOURCE</span>
+            <strong>exact method + bounded neighbors</strong>
+            <small>read only what you need</small>
+          </div>
+        </div>
+        <div class="console-status">
+          <span><i aria-hidden="true"></i> freshness: current</span>
+          <span>Publication-bound evidence</span>
+          <span>source remains read-only</span>
+        </div>
       </div>
-      <div class="flow-strip">
-        <div class="flow-item">
-          <span class="flow-index">01</span>
-          <strong>Ask by intent</strong>
-          <p>Ask for behavior or ownership in plain language.</p>
-        </div>
-        <div class="flow-item">
-          <span class="flow-index">02</span>
-          <strong>Find the owner</strong>
-          <p>Resolve relevant evidence to the indexed owner symbol.</p>
-        </div>
-        <div class="flow-item">
-          <span class="flow-index">03</span>
-          <strong>Read the exact source</strong>
-          <p>Open a bounded symbol or source span, not a whole file.</p>
-        </div>
-        <div class="flow-item">
-          <span class="flow-index">04</span>
-          <strong>Check qualified calls</strong>
-          <p>Follow proved direct calls; unsupported targets are omitted.</p>
-        </div>
-      </div>
-      <p class="section-intro flow-recovery-note">
-        If the index is stale, partial, or not ready, Satori returns a recovery path instead of silent confidence.
-        It never edits your source code; the edit stays in your agent or editor.
-      </p>
       <div class="section-actions">
         <a class="btn primary" href="#quickstart">Try it on a repo</a>
-        <a class="btn secondary" href="architecture.html">See how freshness works</a>
+        <a class="btn secondary" href="docs/index.html#workflow">See the workflow</a>
       </div>
     </section>
 
@@ -1540,27 +1577,35 @@
       </div>
     </section>
 
-    <section class="section">
-      <h3>Where Satori earns its keep</h3>
-      <p class="section-intro">
-        Satori matters when the repository is larger than the prompt.
-      </p>
-      <div class="grid">
-        <article class="card">
-          <h4>Unfamiliar codebases</h4>
-          <p>Give the agent an ownership map before random file reads.</p>
+    <section class="section use-case-section" id="use-cases">
+      <div class="section-kicker">Where it earns its keep</div>
+      <h3>Use Satori when the repository is larger than the prompt.</h3>
+      <div class="use-case-grid">
+        <article class="use-case-feature">
+          <span>ONBOARD</span>
+          <h4>Walk into an unfamiliar codebase with a map.</h4>
+          <p>Ask where a behavior lives, identify the owning symbol, inspect the file structure, then read the implementation instead of browsing the tree at random.</p>
+          <code>“What owns billing retries?”</code>
         </article>
-        <article class="card">
-          <h4>Bug hunts</h4>
-          <p>Move from behavior to its owner and qualified call paths.</p>
+        <article class="use-case-compact">
+          <span>DEBUG</span>
+          <h4>Turn a symptom into source.</h4>
+          <p>Start from an error or behavior, then follow owner and relationship evidence toward the exact code.</p>
         </article>
-        <article class="card">
-          <h4>Refactors</h4>
-          <p>Inspect exact source and call evidence before the first change.</p>
+        <article class="use-case-compact">
+          <span>CHANGE</span>
+          <h4>Plan before the first edit.</h4>
+          <p>Find the owner, nearby structure, bounded source, and supported call paths before changing a subsystem.</p>
         </article>
-        <article class="card">
-          <h4>Smaller or local models</h4>
-          <p>Spend scarce context on relevant code instead of rediscovery.</p>
+        <article class="use-case-compact">
+          <span>LOCAL MODELS</span>
+          <h4>Spend context on implementation.</h4>
+          <p>A strict search → owner → exact source funnel helps smaller models avoid context-heavy repository discovery.</p>
+        </article>
+        <article class="use-case-compact">
+          <span>MULTI-AGENT</span>
+          <h4>Share the code map, not the prompt.</h4>
+          <p>Compatible local sessions attach to one managed runtime and current repository intelligence while keeping independent MCP sessions.</p>
         </article>
       </div>
     </section>
@@ -1600,34 +1645,37 @@ npx -y @zokizuan/satori-cli@latest doctor</code></pre>
       </div>
     </section>
 
-    <section class="section">
-      <h3>Local-first. Read-only. Explicit when unsure.</h3>
-      <p class="section-intro">
-        Satori supplies repository evidence; your agent host or editor remains responsible
-        for changing code.
-      </p>
-      <div class="grid">
-        <article class="card">
-          <h4>Read-only source access</h4>
-          <p>Satori indexes and reads repository evidence. It does not modify your source files.</p>
-        </article>
-        <article class="card">
-          <h4>Graph evidence is advisory</h4>
-          <p>CALLS v0 is navigation evidence, not compiler-grade blast-radius proof.</p>
-        </article>
-        <article class="card">
-          <h4>Open source and inspectable</h4>
-          <p>AGPL-3.0-only source and architecture are public on GitHub.</p>
-        </article>
-        <article class="card">
-          <h4>Connected when you want it</h4>
-          <p>The default stays local; connected Voyage and Milvus/Zilliz paths remain optional.</p>
-        </article>
+    <section class="section maintenance-section" id="maintenance">
+      <div class="section-kicker">Local intelligence, maintained for you</div>
+      <h3>The index is not a static cache you have to babysit.</h3>
+      <div class="maintenance-split">
+        <div class="maintenance-runtime">
+          <span class="maintenance-label">DEFAULT OFFLINE STACK</span>
+          <div class="runtime-stack" role="list">
+            <div role="listitem"><strong>Potion</strong><small>local semantic embeddings</small></div>
+            <div role="listitem"><strong>BM25</strong><small>lexical + exact evidence</small></div>
+            <div role="listitem"><strong>LateOn</strong><small>local query-time reranking</small></div>
+            <div role="listitem"><strong>LanceDB</strong><small>local Publication storage</small></div>
+          </div>
+          <p>No model API key is required for the qualified managed offline path after installation. Connected Voyage and Milvus/Zilliz remain optional advanced runtimes.</p>
+        </div>
+        <div class="maintenance-flow">
+          <span class="maintenance-label">FRESHNESS + REPAIR</span>
+          <div class="maintenance-item"><b>Source changed</b><span>incremental sync prepares a replacement Publication</span></div>
+          <div class="maintenance-item"><b>Sync running</b><span>a compatible proven Publication can remain readable with freshness metadata</span></div>
+          <div class="maintenance-item accent-item"><b>Rebuild required · managed offline</b><span>Satori starts or joins one background reindex automatically</span></div>
+          <div class="maintenance-item"><b>Remote / failed / unsafe</b><span>explicit reindex remains the operator recovery override</span></div>
+          <div class="maintenance-item"><b>Clear</b><span>always explicit; never automatic maintenance</span></div>
+        </div>
+      </div>
+      <div class="trust-boundary-strip">
+        <span><strong>Read-only source</strong> — Satori does not modify repository files.</span>
+        <span><strong>Conservative graph</strong> — absent edges are not proof of no caller.</span>
+        <span><strong>Open source</strong> — AGPL-3.0-only.</span>
       </div>
       <div class="section-actions">
-        <a class="btn primary" href="docs/index.html">Read the docs</a>
+        <a class="btn primary" href="docs/index.html#lifecycle">Read maintenance docs</a>
         <a class="btn secondary" href="architecture.html">Inspect the architecture</a>
-        <a class="btn secondary" href="https://github.com/ham-zax/satori" target="_blank" rel="noopener noreferrer">Open GitHub</a>
       </div>
     </section>
 
@@ -1667,7 +1715,7 @@ npx -y @zokizuan/satori-cli@latest doctor</code></pre>
           <img class="footer-brand-logo" src="logo-mark.svg" alt="" aria-hidden="true" width="39" height="40" />
           <span class="footer-heading">Satori</span>
         </a>
-        <p>Symbol + AST-derived repository intelligence for MCP coding agents.</p>
+        <p>Local repository intelligence for coding agents: search, ownership, structure, relationships, freshness, and exact source.</p>
       </div>
       <div class="footer-col">
         <div class="footer-heading">Resources</div>

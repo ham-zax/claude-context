@@ -44,7 +44,7 @@ pnpm --filter @zokizuan/satori-mcp docs:check
 - Keep routing and tool exposure capability-driven (no direct env checks in handlers).
 - Keep tool schemas canonical in `src/tools/*` Zod definitions; JSON Schema must be generated from those definitions.
 - Treat the selected immutable Publication as the sole durable indexed/source/navigation/policy authority; unsupported pre-clean-break state requires a fresh index/reindex.
-- Preserve deterministic "train in the error" responses for reindex requirements.
+- Managed offline runtimes should transparently start or join rebuild-safe reindex maintenance for already-tracked incompatible Publications. Preserve deterministic `requires_reindex` recovery responses for states where automatic maintenance is unavailable, suppressed after failure, or unsafe.
 - Do not reintroduce compatibility aliases for removed tools.
 - Keep `search_codebase` telemetry as structured stderr JSON (`event=search_executed`).
 - Keep `read_file` line-range semantics 1-based and inclusive (`start_line`/`end_line`), with deterministic truncation hints when capped by `READ_FILE_MAX_LINES`.

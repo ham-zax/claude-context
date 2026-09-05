@@ -55,24 +55,17 @@ test('generated ListTools payload returns the seven tools', () => {
     assert.deepEqual(names, ['manage_index', 'search_codebase', 'continue_search', 'call_graph', 'file_outline', 'read_file', 'list_codebases']);
 });
 
-test('search_codebase and manage_index descriptions include ignore-remediation guidance', () => {
+test('search_codebase description exposes current retrieval and remediation guidance', () => {
     const tools = getMcpToolList(buildContext());
     const searchTool = tools.find((tool) => tool.name === 'search_codebase');
-    const manageTool = tools.find((tool) => tool.name === 'manage_index');
 
     assert.ok(searchTool);
-    assert.ok(manageTool);
-
     assert.match(searchTool!.description, /\.satoriignore/);
     assert.match(searchTool!.description, /scope=\"runtime\"/);
     assert.match(searchTool!.description, /runtime-first/i);
     assert.match(searchTool!.description, /must:/);
     assert.match(searchTool!.description, /debugMode=summary\|ranking\|freshness\|full/i);
     assert.match(searchTool!.description, /hints/i);
-
-    assert.match(manageTool!.description, /Ignore-rule edits/i);
-    assert.match(manageTool!.description, /normal sync path/i);
-    assert.match(manageTool!.description, /current Publication is incompatible, missing, or unprovable/i);
 });
 
 // F-AC-01: MCP tool description must calibrate CALLS as capability-gated, conservative, bounded, and advisory.

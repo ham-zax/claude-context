@@ -11,6 +11,10 @@ import type {
 } from "./completion-proof.js";
 import type { ManageIndexAction } from "./manage-types.js";
 import type {
+    AutomaticReindexReason,
+    AutomaticReindexScheduleResult,
+} from "./index-maintenance-coordinator.js";
+import type {
     SearchGroupBy,
     SearchResultMode,
     SearchScope,
@@ -109,9 +113,14 @@ export type TrackedRootReadinessHost = {
         collectionName?: string;
     }>;
     buildCreateHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
+    buildReindexHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
     buildStatusHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
     buildManageIndexRecommendedAction(action: ManageIndexAction, codebasePath: string, rationale: string): SearchRecommendedNextAction;
     buildStaleLocalMessage(codebasePath: string, requestedPath: string, reason: CompletionProofReason): string;
+    requestAutomaticReindex?(
+        codebasePath: string,
+        reason: AutomaticReindexReason,
+    ): Promise<AutomaticReindexScheduleResult>;
 };
 
 export type ReadinessPhase =
@@ -173,7 +182,7 @@ export class TrackedRootReadiness {
         const collectionDetail = collectionName
             ? ` Vector collection is missing from the configured vector backend ('${collectionName}').`
             : " Vector collection is missing from the configured vector backend.";
-        return `Codebase '${codebasePath}' has stale local index metadata.${collectionDetail}${requestedPathDetail} Read paths fail closed and will not rebuild implicitly. Run manage_index with {"action":"create","path":"${codebasePath}"} to restore local readiness.`;
+        return `Codebase '${codebasePath}' has a current Publication whose configured vector collection is unavailable.${collectionDetail}${requestedPathDetail} Automatic maintenance did not recover this state; use manage_index with {"action":"reindex","path":"${codebasePath}"} as the explicit recovery override.`;
     }
 
     public buildMissingLocalCollectionSearchPayload(
@@ -194,12 +203,12 @@ export class TrackedRootReadiness {
             limit: searchContext.limit,
             message: this.buildMissingLocalCollectionMessage(codebasePath, searchContext.path, collectionName),
             recommendedNextAction: this.host.buildManageIndexRecommendedAction(
-                "create",
+                "reindex",
                 codebasePath,
-                "Restore index readiness because local metadata points at a missing configured vector backend collection.",
+                "Rebuild the current Publication because its configured vector collection is unavailable.",
             ),
             hints: {
-                create: this.host.buildCreateHint(codebasePath),
+                reindex: this.host.buildReindexHint(codebasePath),
             },
             results: [],
         } as SearchResponseEnvelope;
@@ -328,7 +337,7 @@ export class TrackedRootReadiness {
             hasMore: false,
             message: this.buildMissingLocalCollectionMessage(codebasePath, requestedPath, collectionName),
             hints: {
-                create: this.host.buildCreateHint(codebasePath),
+                reindex: this.host.buildReindexHint(codebasePath),
             },
         };
     }
@@ -353,7 +362,7 @@ export class TrackedRootReadiness {
             notes: [],
             message: this.buildMissingLocalCollectionMessage(codebasePath, context.path, collectionName),
             hints: {
-                create: this.host.buildCreateHint(codebasePath),
+                reindex: this.host.buildReindexHint(codebasePath),
             },
         };
     }
@@ -401,6 +410,28 @@ export class TrackedRootReadiness {
         return this.evaluateRootReadiness(searchableRoot, accessMode, onPhase);
     }
 
+    private async scheduleAutomaticReindex(
+        codebasePath: string,
+        reason: AutomaticReindexReason,
+    ): Promise<Extract<TrackedRootReadinessState, { state: "indexing" }> | null> {
+        if (!this.host.requestAutomaticReindex) return null;
+        try {
+            const scheduled = await this.host.requestAutomaticReindex(codebasePath, reason);
+            if (scheduled.outcome !== "started" && scheduled.outcome !== "coalesced") {
+                return null;
+            }
+            const operation = this.host.getIndexingOperation?.(codebasePath);
+            return {
+                state: "indexing",
+                codebasePath,
+                ...(operation ? { operation } : {}),
+                searchableGenerationAvailable: this.host.hasSearchableGeneration?.(codebasePath) ?? false,
+            };
+        } catch {
+            return null;
+        }
+    }
+
     private async evaluateRootReadiness(
         targetRoot: TrackedRootEntry,
         accessMode: "semantic" | "navigation",
@@ -418,6 +449,13 @@ export class TrackedRootReadiness {
             onPhase,
         );
         if (completionProof.outcome === "policy_incompatible") {
+            if (completionProof.reason === "runtime_policy_incompatible") {
+                const indexing = await this.scheduleAutomaticReindex(
+                    effectiveRoot,
+                    "runtime_policy_incompatible",
+                );
+                if (indexing) return indexing;
+            }
             return {
                 state: "requires_reindex",
                 codebasePath: effectiveRoot,
@@ -426,6 +464,8 @@ export class TrackedRootReadiness {
         }
         if (completionProof.outcome === "stale_local") {
             if (completionProof.reason === "requires_reindex") {
+                const indexing = await this.scheduleAutomaticReindex(effectiveRoot, "requires_reindex");
+                if (indexing) return indexing;
                 return {
                     state: "requires_reindex",
                     codebasePath: effectiveRoot,
@@ -451,6 +491,18 @@ export class TrackedRootReadiness {
             };
         }
 
+        if (
+            accessMode === "navigation"
+            && (completionProof.navigationStatus === "missing"
+                || completionProof.navigationStatus === "incompatible")
+        ) {
+            const indexing = await this.scheduleAutomaticReindex(
+                effectiveRoot,
+                "navigation_reindex_required",
+            );
+            if (indexing) return indexing;
+        }
+
         const collectionName = completionProof.publication.publication.vector.collectionName;
         const collectionState = await this.measureAsyncPhase(
             "collection_probe",
@@ -458,6 +510,11 @@ export class TrackedRootReadiness {
             onPhase,
         );
         if (collectionState.state === "missing") {
+            const indexing = await this.scheduleAutomaticReindex(
+                effectiveRoot,
+                "missing_collection",
+            );
+            if (indexing) return indexing;
             return {
                 state: "missing_collection",
                 codebasePath: effectiveRoot,

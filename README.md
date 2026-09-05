@@ -4,36 +4,130 @@
 [![CI](https://github.com/ham-zax/satori/actions/workflows/ci.yml/badge.svg)](https://github.com/ham-zax/satori/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@zokizuan/satori-cli?label=npm)](https://www.npmjs.com/package/@zokizuan/satori-cli)
 
-Give any MCP-compatible coding harness symbol and AST-derived code intelligence—fast, local, and context-efficient.
+**Understand any codebase before you touch it.**
 
-Satori is a local-first code-intelligence layer for coding agents. Through MCP, a generic harness gets exact symbol navigation, parser-derived structural outlines and source spans, conservative call relationships, and hybrid retrieval without building its own language-intelligence stack. The agent can find behavior by intent, open the real owner, and request a bounded code slice instead of scanning whole files or the repository wholesale. Offline search uses bundled Potion embeddings, BM25, and LanceDB—no model API key required.
+Satori turns a repository into a **local intelligence database** that coding agents can search, navigate, and interrogate. It combines semantic retrieval, exact lexical evidence, symbol ownership, parser-derived structure, conservative code relationships, exact source spans, and source freshness—then exposes that intelligence through MCP to Codex, Claude Code, OpenCode, and other compatible harnesses.
 
-## Product
+The default managed runtime is local: Potion embeddings + BM25 + LateOn reranking + LanceDB on Linux x64 / WSL2. No model API key is required for the offline path after installation.
 
-Satori is built for the part of coding-agent work that should be fast, repeatable, and evidence-backed before any edit happens:
+```text
+Repository
+   |
+   v
+semantic + lexical evidence
+   + symbols + structure
+   + supported relationships
+   + source freshness
+   |
+   v
+Ask -> locate owner -> trace -> read exact source
+```
 
-- **Drop-in symbol + AST-derived intelligence.** Any MCP-compatible harness can use exact symbols, structural outlines, source spans, ownership, and qualified call navigation without implementing its own parser and repository index stack.
-- **Fast local retrieval.** On the Satori repository benchmark, warm Potion + LanceDB search measured **154.543 ms p95** across 10,830 indexed chunks. The benchmark and its limits are documented below.
-- **Massively less context waste.** Ranked owner-oriented results and bounded symbol/source reads keep broad file dumps out of the model context, so repository discovery spends tokens on the exact code the agent needs instead of scanning whole files.
-- **Robust publication architecture.** Satori builds complete searchable generations, checks source freshness, and activates publications atomically instead of exposing a partially updated index.
-- **Real language navigation.** TypeScript, JavaScript, Python, Go, Java, C#, C++, Rust, and Scala have production symbol navigation plus qualified `CALLS v0` support.
-- **Conservative graph semantics.** Ambiguous or unproved call relationships fail closed; the graph is navigation evidence, not a compiler-grade blast-radius claim.
-- **Local-first runtime.** The default Linux x64 / WSL2 path runs Potion + LanceDB locally and shares one managed runtime across compatible agent sessions.
-- **Coordinated releases.** CLI, MCP, and Core are qualified and packed as one exact dependency closure before publication, preventing accidental mix-and-match runtime combinations.
+Satori does **not** edit your source code. It gives the agent better repository evidence before the edit.
 
-Satori is not another code editor or autonomous patcher. It is the repository intelligence product an agent consults before it changes code.
+## 30-second example
+
+You open an unfamiliar repository and ask:
+
+```text
+Where is refresh-token rotation implemented, what owns it,
+and what exact code should I inspect before changing it?
+```
+
+Instead of repeatedly guessing filenames and dumping large files, an agent can use Satori to:
+
+1. search by intent and exact evidence;
+2. resolve relevant matches to owning symbols;
+3. inspect the structure of the owning file;
+4. follow supported callers/callees when useful;
+5. read the exact symbol or bounded source span;
+6. see whether that evidence is current, stale, or under maintenance.
+
+That evidence funnel is the product.
+
+## What can you ask Satori?
+
+```text
+Where is authentication refresh handled?
+
+What owns index publication?
+
+Find the code responsible for automatic reindexing.
+
+Where does this user-facing error originate?
+
+Which code handles this configuration setting?
+
+Show me the structure of this file without dumping the whole file.
+
+What directly calls this symbol?
+
+What code should I inspect before changing this subsystem?
+```
+
+You do not need to know the correct filename or identifier before you start.
+
+## What Satori knows about a repository
+
+A Satori Publication is an immutable snapshot of everything Satori knows about one coherent repository generation. That knowledge includes:
+
+| Intelligence layer | What it gives the agent |
+|---|---|
+| Semantic embeddings | Find behavior by meaning when identifiers are unknown |
+| BM25 + exact evidence | Preserve symbols, paths, config keys, errors, and literal clues |
+| Symbol ownership | Map matching evidence back to functions, methods, classes, and supported owners |
+| Parser-derived structure | File outlines and exact source spans without reading whole files first |
+| Relationship evidence | Conservative callers, callees, imports, and exports where supported |
+| Source checkpoints | Know whether indexed evidence still matches the repository |
+| Index policy | Know what files/extensions/ignore rules belong to the Publication |
+| Publication generations | Keep search, navigation, relationships, and freshness on one coherent state |
+
+## Why developers use it
+
+- **Learn unfamiliar codebases.** Ask where behavior lives before learning the repository tree by hand.
+- **Investigate bugs.** Move from a symptom or error string to the owning implementation and related evidence.
+- **Plan refactors.** Inspect the owner, nearby structure, exact source, and supported relationships before the first change.
+- **Reduce context waste.** Prefer symbol-sized evidence and bounded source over broad repository/file dumps.
+- **Help smaller/local models.** Spend scarce context on the code that matters rather than on discovery.
+- **Give multiple agents one code map.** Compatible local sessions can share the managed runtime and repository intelligence.
+- **Keep the map current.** Ordinary edits converge through sync; managed offline rebuild-safe incompatibilities can reindex automatically instead of making the user babysit the index.
+
+## Features
+
+### Hybrid repository search
+
+Semantic retrieval finds concepts; BM25 and exact evidence keep literal code facts precise. Owner-oriented grouping reduces duplicate chunk noise.
+
+### Code map and exact source
+
+TypeScript, JavaScript, Python, Go, Java, C#, C++, Rust, and Scala have production symbol navigation plus the current qualified `CALLS v0` slice. `file_outline` exposes structure; `read_file` opens an exact indexed symbol or bounded source range.
+
+### Conservative relationship navigation
+
+Satori prefers missing evidence over invented certainty. Call-graph results are navigation leads, not compiler-grade whole-program blast-radius proof.
+
+### Freshness and self-maintenance
+
+Satori tracks repository source checkpoints, prepares replacement Publications atomically, and distinguishes fresh, changed, unverified, indexing, and rebuild-required states. On the managed offline path, rebuild-safe incompatibilities can automatically start or join one background reindex. Connected/remote and failed/unsafe recovery remains explicit.
+
+### Local-first runtime
+
+The default Linux x64 / WSL2 path runs Potion embeddings, BM25, LateOn reranking, and LanceDB locally. Connected Voyage and Milvus/Zilliz remain optional advanced configurations.
+
+### Shared managed runtime
+
+Compatible Codex, Claude Code, OpenCode, and subagent sessions can attach to one private local Satori host instead of starting one heavy provider/index stack per session.
 
 ## Documentation
 
-Start with the current product docs rather than dated implementation plans:
+- [`docs/PRODUCT_GUIDE.md`](./docs/PRODUCT_GUIDE.md) — how to think about Satori and use it for repository learning, debugging, refactors, local models, and multi-agent work.
+- [`docs/README.md`](./docs/README.md) — documentation map and current-vs-historical guidance.
+- [`satori-landing/docs/index.html`](./satori-landing/docs/index.html) — complete operational setup, tool, lifecycle, and troubleshooting reference.
+- [`satori-landing/architecture.html`](./satori-landing/architecture.html) — Publication, retrieval, navigation, freshness, and runtime architecture.
+- [`docs/architecture/LANGUAGE_INTELLIGENCE.md`](./docs/architecture/LANGUAGE_INTELLIGENCE.md) — language backends and relationship capability boundaries.
+- [`docs/RELEASING.md`](./docs/RELEASING.md) — release qualification and publication workflow.
 
-- [`docs/README.md`](./docs/README.md) — current-vs-historical documentation map.
-- [`docs/architecture/LANGUAGE_INTELLIGENCE.md`](./docs/architecture/LANGUAGE_INTELLIGENCE.md) — current language backends, capability boundaries, and relationship architecture.
-- [`docs/RELEASING.md`](./docs/RELEASING.md) — release qualification, npm authentication, publication, and registry verification.
-- [`satori-landing/docs/index.html`](./satori-landing/docs/index.html) — end-user operational reference for the seven MCP tools.
-- [`satori-landing/architecture.html`](./satori-landing/architecture.html) — public architecture overview for Publications, local retrieval, and call navigation.
-
-Files under `docs/plans/`, `docs/research/`, `docs/remediation/`, and `docs/superpowers/agent-plans/` are historical engineering records unless a current document explicitly points to them as an active specification.
+Dated files under `docs/plans/`, `docs/research/`, `docs/remediation/`, and `docs/superpowers/` are engineering history unless a current document explicitly points to them as an active contract.
 
 ## Install
 
@@ -127,42 +221,81 @@ An upgrade follows one coordinated release closure declared by the latest CLI pa
 
 For other no-install commands, replace `satori` with `npx -y @zokizuan/satori-cli@latest`.
 
+## First five minutes
+
+### 1. Create the repository intelligence database
+
+The first index is explicit: Satori will not silently decide to ingest an arbitrary workspace. Tell your coding agent:
+
 ```text
-plain-English question
-        |
-        v
-exact evidence + BM25 + dense retrieval
-        |
-        v
-symbol-owned results
-        |
-        v
-outline, call graph, and bounded source reads
+Index /absolute/path/to/repo with Satori.
 ```
 
-## What changes for your agent
+Full creation runs in the background. Once the Publication is ready, the repository has a durable intelligence layer the agent can query.
 
-| Without a code map | With Satori |
+### 2. Ask for behavior, not filenames
+
+```text
+Use Satori to find where auth refresh is handled,
+identify the owner, and show me the exact implementation to inspect first.
+```
+
+### 3. Follow the evidence funnel
+
+```text
+search_codebase
+    -> owner-oriented result
+    -> file_outline / call_graph when useful
+    -> read_file for exact proof
+    -> continue_search only if the frozen result has more useful evidence
+```
+
+You normally do not need to orchestrate these tools manually. They are the seven MCP primitives your coding agent uses to interrogate the repository database.
+
+## How Satori changes the workflow
+
+| Without a repository intelligence layer | With Satori |
 |---|---|
 | Guess filenames and repeat broad searches | Ask where behavior lives in plain English |
 | Read large files to reconstruct ownership | Open an exact symbol or bounded source span |
-| Lose lexical identifiers in semantic-only search | Combine exact evidence, BM25, and dense retrieval |
-| Work from an index that may have drifted | Detect source changes before returning evidence |
-| Assemble relationships from scattered reads | Follow owner-oriented navigation and advisory call graphs |
+| Lose literals in semantic-only search | Combine semantic, BM25, path, symbol, and exact evidence |
+| Rebuild a mental map in every session | Reuse a persistent Publication-backed code map |
+| Work from an index that may have drifted | Carry explicit source freshness and maintenance state |
+| Assemble relationships from scattered reads | Follow conservative owner-oriented navigation evidence |
 
-Satori does not edit source code. It gives the agent better evidence before the edit.
+## Where it earns its keep
 
-## Why Satori
+### Unfamiliar codebases
 
-- Find behavior by intent when filenames and exact identifiers are unknown.
-- Keep exact paths, symbols, configuration keys, and lexical evidence in the retrieval path.
-- Return owner-oriented groups instead of flooding the agent with duplicate chunks.
-- Open exact symbols or bounded line ranges instead of dumping entire files.
-- Detect source drift and publish complete searchable generations atomically.
-- Run fully local retrieval with Potion Code 16M v2 and LanceDB on Linux x64.
-- Share the managed offline runtime across compatible local agent sessions
-  instead of starting one heavy runtime per session.
-- Install one managed MCP runtime for Codex, Claude Code, OpenCode, or all three.
+Use Satori as the first map. Ask what owns a behavior, inspect the file structure, then open the implementation rather than browsing the tree at random.
+
+### Bug investigation
+
+Start from a symptom, error string, or behavior description and move toward the owning source. Use supported relationships as leads, not as a substitute for compiler/test/runtime proof.
+
+### Refactor and feature planning
+
+Find the owner and exact source before proposing a change. Inspect nearby symbols and qualified call evidence when they materially affect scope.
+
+### Smaller and local models
+
+Use a strict retrieval funnel—search, owner, outline, exact span—so limited context is spent on implementation rather than repository discovery.
+
+### Multi-agent work
+
+Compatible local sessions can share the managed runtime and current repository intelligence while keeping their MCP sessions independent.
+
+## The index maintains itself where it safely can
+
+Satori distinguishes ordinary source drift from states that need a full rebuild:
+
+- **ordinary edits:** incremental sync prepares a replacement Publication;
+- **compatible completed Publication + sync running:** reads can continue from the proven generation with freshness metadata;
+- **managed offline rebuild-safe incompatibility:** Satori automatically starts or joins one background reindex and returns deterministic `not_ready` / `indexing` state for retry;
+- **connected/remote, unsafe, or failed automatic recovery:** explicit `manage_index reindex` remains the operator override;
+- **clear:** always explicit.
+
+This keeps routine local reindex maintenance out of the user's way without hiding cases where a rebuild can have operational or provider-cost consequences.
 
 <details>
 <summary><strong>Measured evidence from the Satori repository</strong></summary>
@@ -302,8 +435,8 @@ Restart OpenCode after restoring the published runtime.
 
 | Tool | Purpose |
 |---|---|
-| `manage_index` | Create, synchronize, inspect, cancel a live supervised sync, reindex, or clear a repository index. Compatible completed Publications remain readable while source freshness is changed/unverified or a replacement sync is running; status exposes that distinction. |
-| `search_codebase` | Run freshness-aware hybrid search and return symbol-owned evidence. Start here for behavior, ownership, configuration, or path discovery. |
+| `manage_index` | Manage the repository-intelligence Publication: create the first index, synchronize source changes, inspect readiness, cancel a live supervised sync, recover with reindex, or clear index state. Managed offline runtimes automatically start or join rebuild-safe background reindex maintenance; explicit reindex remains the operator recovery override. |
+| `search_codebase` | Search the repository-intelligence Publication with semantic, lexical, and exact evidence and return owner-oriented results. Start here for behavior, ownership, configuration, or path discovery. |
 | `continue_search` | Reveal more of one frozen result set without rerunning retrieval. Use it when the initial disclosure is relevant but incomplete. |
 | `file_outline` | List the indexed symbols and spans in one file. Use it to choose an exact owner before reading implementation. |
 | `call_graph` | Inspect advisory callers, callees, imports, and exports when supported. Verify inbound leads before blast-radius changes. |
@@ -323,7 +456,7 @@ Public paths are absolute. `read_file` is restricted to tracked searchable roots
 6. use continue_search only when the frozen result has more useful evidence
 ```
 
-If a tool returns `requires_reindex`, reindex before retrying the original call. Use `sync` for ordinary source changes when refreshed indexed evidence is needed. Search and navigation do not wait for a same-root sync: when a compatible completed Publication exists, they continue from that pinned generation with stale/unverified provenance and pending-sync metadata. Create/reindex operations that do not expose a readable generation still return `not_ready` with the active operation so drivers can retry deterministically. For grouped pagination, `limit` bounds the frozen result set across every page and `disclosureLimit` controls only the initial page: `limit=20, disclosureLimit=6` returns up to six initially and freezes up to twenty. Search continuation `"complete"` means complete for that caller-bounded frozen set, never for the full available pool; `omittedBeyondLimitGroupCount` reports groups excluded by `limit`. Treat inbound call-graph results as leads to verify, not compiler-grade blast-radius proof.
+When a tracked Publication becomes incompatible with a managed offline runtime, Satori automatically starts or joins one background reindex and returns `not_ready`/`indexing` so the caller can retry without asking the user to repair the index. Explicit `manage_index reindex` remains the recovery override when automatic maintenance is unavailable, suppressed after a failed automatic attempt, or intentionally disabled for connected/remote providers. Use `sync` for ordinary source changes when refreshed indexed evidence is needed. Search and navigation do not wait for a same-root sync: when a compatible completed Publication exists, they continue from that pinned generation with stale/unverified provenance and pending-sync metadata. Create/reindex operations that do not expose a readable generation still return `not_ready` with the active operation so drivers can retry deterministically. For grouped pagination, `limit` bounds the frozen result set across every page and `disclosureLimit` controls only the initial page: `limit=20, disclosureLimit=6` returns up to six initially and freezes up to twenty. Search continuation `"complete"` means complete for that caller-bounded frozen set, never for the full available pool; `omittedBeyondLimitGroupCount` reports groups excluded by `limit`. Treat inbound call-graph results as leads to verify, not compiler-grade blast-radius proof.
 
 ## Index Profiles
 
@@ -370,7 +503,7 @@ Run `doctor` after changing runtime configuration. Restart every Satori MCP clie
 
 Satori stores each index generation as one immutable Publication. A complete Publication owns the vector collection, navigation, selection policy and format identity, and source checkpoint for that generation. Readers pin one Publication for the lifetime of a request; activation makes a complete replacement Publication current, while failed candidate work leaves the active Publication unchanged.
 
-Incremental synchronization scans for source changes, embeds changed chunks only, updates navigation and relationship evidence, and activates the complete replacement Publication. Ordinary source divergence converges through `sync`. Missing, corrupt, or incompatible current authority requires `reindex`; Satori does not expose a repair command or salvage retired authority formats into the current Publication model.
+Incremental synchronization scans for source changes, embeds changed chunks only, updates navigation and relationship evidence, and activates the complete replacement Publication. Ordinary source divergence converges through `sync`. Managed offline runtimes automatically rebuild a tracked Publication when the current format/runtime identity or runtime policy requires a full reindex; corrupt or unsupported authority still fails closed for explicit operator recovery. Satori does not expose a repair command or salvage retired authority formats into the current Publication model.
 
 ## Offline Local Reranking
 

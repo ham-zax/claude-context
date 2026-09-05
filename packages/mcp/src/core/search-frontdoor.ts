@@ -282,7 +282,7 @@ export async function runSearchFrontDoor(
     const freshnessDecision = await host.assessSearchFreshness(initialRoot, state);
     host.noteFreshnessMode(freshnessDecision.mode);
     const freshnessBlocked = host.buildFreshnessBlockedSearchPayload(initialRoot, freshnessDecision, searchContext);
-    if (freshnessBlocked) {
+    if (freshnessBlocked && freshnessDecision.mode !== "skipped_requires_reindex") {
         if (freshnessBlocked.status === "not_ready" && freshnessBlocked.reason === "indexing") {
             const operation = host.getIndexingOperation?.(initialRoot);
             return {
@@ -327,6 +327,7 @@ export async function runSearchFrontDoor(
     }
     const postBlocked = buildBlockedReadinessPayload(postFreshness, searchContext, host);
     if (postBlocked) return { kind: "blocked", payload: postBlocked };
+    if (freshnessBlocked) return { kind: "blocked", payload: freshnessBlocked };
     if (postFreshness.state !== "ready") {
         throw new Error(`Unexpected post-freshness readiness state: ${postFreshness.state}`);
     }
