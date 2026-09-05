@@ -2,6 +2,8 @@ export declare const DEFAULT_LAUNCHER_SHUTDOWN_GRACE_MS: number;
 
 export declare function parseManagedLauncherEnvironment(content: string): Readonly<Record<string, string>>;
 
+export declare function parseManagedLauncherCohortToken(content: string): string;
+
 export declare function parseManagedLauncherDescriptor(content: string): Readonly<{
     command: string;
     args: readonly string[];
@@ -13,5 +15,6 @@ export declare function buildLauncherScript(options: {
     args: readonly string[];
     managedEnv?: Readonly<Record<string, string>>;
     managedRuntimeRoot?: string;
+    managedLauncherPath?: string;
     shutdownGraceMs?: number;
 }): string;

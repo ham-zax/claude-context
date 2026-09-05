@@ -61,6 +61,7 @@ import {
 } from "./managed-runtime-closure.js";
 import { resolveLauncherPath } from "./managed-runtime-paths.js";
 import { parseManagedLauncherDescriptor } from "./managed-launcher-script.mjs";
+import { activateAfterRetiringManagedRuntime } from "./runtime-activation.js";
 
 export function upgradeRuntimeSelection(
     homeDir: string,
@@ -270,20 +271,21 @@ export async function executeManagedRuntimeUpgrade(
         let candidate: ManagedRuntimeCandidate | undefined;
         try {
         options.onUpgradeProgress?.("installing");
-        candidate = installManagedRuntimeCandidate(
+        const installedCandidate = installManagedRuntimeCandidate(
             homeDir,
             target.mcpPackageSpecifier,
             options.execFileSyncImpl ?? execFileSync,
             target.coreVersion,
             runtimeClosure,
         );
+        candidate = installedCandidate;
         options.onUpgradeProgress?.("verifying");
         const potionAssetsRoot = options.potionAssetsRoot
-            ?? resolvePotionAssetsRoot(candidate.packageRoot);
+            ?? resolvePotionAssetsRoot(installedCandidate.packageRoot);
         const lateOnModel = selection.runtime === "offline" && selection.reranker === "lateon"
             ? await resolveVerifiedLateOnModel(
                 homeDir,
-                candidate.packageRoot,
+                installedCandidate.packageRoot,
                 options.lateOnModelPath ?? selection.lateOnModelPath,
                 options.fetchImpl,
                 options.lateOnAuthorityLoader,
@@ -293,7 +295,7 @@ export async function executeManagedRuntimeUpgrade(
             )
             : undefined;
         const preflightDependencies: InstallPreflightDependencies = {
-            ...exactRuntimePreflightDependencies(candidate.command),
+            ...exactRuntimePreflightDependencies(installedCandidate.command),
             ...options.preflightDependencies,
         };
         const preflight = await (options.preflightRunner ?? runInstallPreflight)({
@@ -315,7 +317,7 @@ export async function executeManagedRuntimeUpgrade(
             architecture: options.architecture,
         }, preflightDependencies);
         await (preflightDependencies.probeCandidateRuntime ?? probeManagedRuntimeCandidate)({
-            runtimeCommand: candidate.command,
+            runtimeCommand: installedCandidate.command,
             runtimeEnvironment: preflight.runtimeEnvironment,
             inheritedEnvironment: selection.effectiveEnv,
             homeDir,
@@ -324,20 +326,24 @@ export async function executeManagedRuntimeUpgrade(
 
         assertFileContentUnchanged(launcherPath, launcherContent);
         options.onUpgradeProgress?.("activating");
-        const launcherMutation = prepareLauncherInstall(
+        await activateAfterRetiringManagedRuntime({
             homeDir,
-            candidate.command,
-            preflight.runtimeEnvironment,
-        );
-        launcherMutation.assertUnchanged?.();
-        launcherMutation.apply();
-        if (candidate) {
-            pruneManagedRuntimeAfterActivation(
+            env: selection.effectiveEnv,
+            terminateRunner: options.terminateRunner,
+        }, () => {
+            const launcherMutation = prepareLauncherInstall(
                 homeDir,
-                candidate.runtimeRoot,
+                installedCandidate.command,
+                preflight.runtimeEnvironment,
+            );
+            launcherMutation.assertUnchanged?.();
+            launcherMutation.apply();
+        });
+        pruneManagedRuntimeAfterActivation(
+                homeDir,
+                installedCandidate.runtimeRoot,
                 { ...selection.effectiveEnv, ...preflight.runtimeEnvironment },
             );
-        }
         } catch (error) {
             if (candidate?.newlyInstalled) {
                 fs.rmSync(candidate.runtimeRoot, { recursive: true, force: true });

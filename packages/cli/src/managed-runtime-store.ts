@@ -19,7 +19,7 @@ type ProcessIdentity = Readonly<{
     processStartTime?: string;
 }>;
 
-type RuntimeUseLease = Readonly<{
+export type RuntimeUseLease = Readonly<{
     formatVersion: 1;
     leaseId: string;
     pid: number;
@@ -238,12 +238,13 @@ function parseRuntimeUseLease(value: unknown): RuntimeUseLease | null {
 function collectLeaseProtectedRoots(
     storageRoot: string,
     inspectProcess: (pid: number) => ProcessIdentity | null,
-): { roots: Set<string>; warnings: string[]; unsafe: boolean } {
+): { roots: Set<string>; leases: RuntimeUseLease[]; warnings: string[]; unsafe: boolean } {
     const leasesRoot = path.join(storageRoot, LEASES_DIRECTORY);
     const roots = new Set<string>();
+    const leases: RuntimeUseLease[] = [];
     const warnings: string[] = [];
     if (!fs.existsSync(leasesRoot)) {
-        return { roots, warnings, unsafe: false };
+        return { roots, leases, warnings, unsafe: false };
     }
     let entries: fs.Dirent[];
     try {
@@ -251,6 +252,7 @@ function collectLeaseProtectedRoots(
     } catch (error) {
         return {
             roots,
+            leases,
             warnings: [`Could not read managed runtime leases: ${error instanceof Error ? error.message : String(error)}`],
             unsafe: true,
         };
@@ -267,8 +269,18 @@ function collectLeaseProtectedRoots(
             lease = null;
         }
         if (!lease) {
+            let oldEnoughToRecover = false;
+            try {
+                oldEnoughToRecover = Date.now() - fs.statSync(leasePath).mtimeMs >= METADATALESS_LOCK_STALE_MS;
+            } catch {
+                oldEnoughToRecover = true;
+            }
+            if (oldEnoughToRecover) {
+                fs.rmSync(leasePath, { force: true });
+                continue;
+            }
             warnings.push(`Managed runtime lease is malformed at ${leasePath}.`);
-            return { roots, warnings, unsafe: true };
+            return { roots, leases, warnings, unsafe: true };
         }
         if (!processIdentityMatches(lease, inspectProcess(lease.pid))) {
             fs.rmSync(leasePath, { force: true });
@@ -278,11 +290,12 @@ function collectLeaseProtectedRoots(
             ?? inspectManagedRuntimeDirectory(storageRoot, path.resolve(lease.runtimeRoot))?.root;
         if (!managedRoot) {
             warnings.push(`Live managed runtime lease points outside the runtime store: ${leasePath}.`);
-            return { roots, warnings, unsafe: true };
+            return { roots, leases, warnings, unsafe: true };
         }
         roots.add(managedRoot);
+        leases.push(lease);
     }
-    return { roots, warnings, unsafe: false };
+    return { roots, leases, warnings, unsafe: false };
 }
 
 function collectLiveRuntimeOwnerVersions(
@@ -496,6 +509,41 @@ function acquireStoreLock(
     return () => {
         fs.closeSync(lockFd);
         fs.rmSync(lockPath, { force: true });
+    };
+}
+
+export function acquireManagedRuntimeLeaseLock(
+    options: ManagedRuntimeMutationLockOptions = {},
+): () => void {
+    const homeDir = options.homeDir ?? os.homedir();
+    const inspectProcess = options.inspectProcess ?? inspectProcessDefault;
+    const now = options.now ?? (() => Date.now());
+    return acquireStoreLock(
+        runtimeStorageRoot(homeDir),
+        LEASE_LOCK_FILE,
+        inspectProcess,
+        now,
+    );
+}
+
+export function inspectManagedRuntimeLeases(
+    options: ManagedRuntimeMutationLockOptions = {},
+): Readonly<{
+    leases: readonly RuntimeUseLease[];
+    warnings: readonly string[];
+    unsafe: boolean;
+}> {
+    const homeDir = options.homeDir ?? os.homedir();
+    const storageRoot = runtimeStorageRoot(homeDir);
+    if (!fs.existsSync(storageRoot)) {
+        return { leases: [], warnings: [], unsafe: false };
+    }
+    const inspectProcess = options.inspectProcess ?? inspectProcessDefault;
+    const result = collectLeaseProtectedRoots(storageRoot, inspectProcess);
+    return {
+        leases: result.leases,
+        warnings: result.warnings,
+        unsafe: result.unsafe,
     };
 }
 

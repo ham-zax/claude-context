@@ -1842,8 +1842,8 @@ test("default managed launcher preserves time for cooperative shutdown", {
     const markerPath = path.join(homeDir, "shutdown-complete");
     const runtimeCode = [
         'const fs = require("node:fs");',
-        'console.log(`SATORI_TEST_CHILD_PID=${process.pid}`);',
         `process.on("SIGTERM", () => setTimeout(() => { fs.writeFileSync(${JSON.stringify(markerPath)}, "ok"); process.exit(0); }, 1_500));`,
+        'console.log(`SATORI_TEST_CHILD_PID=${process.pid}`);',
         "setInterval(() => {}, 1_000);",
     ].join("");
 

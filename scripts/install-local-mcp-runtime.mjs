@@ -190,28 +190,35 @@ function createLocalInstallCommand(options, managedEnv) {
 
 async function loadActivationOwner(repoRoot) {
   const installModulePath = path.join(repoRoot, 'packages', 'cli', 'dist', 'install.js');
+  const installApplicationModulePath = path.join(repoRoot, 'packages', 'cli', 'dist', 'install-application.js');
   const preflightModulePath = path.join(repoRoot, 'packages', 'cli', 'dist', 'install-preflight.js');
-  const terminateModulePath = path.join(repoRoot, 'packages', 'cli', 'dist', 'terminate.js');
-  if (!fs.existsSync(installModulePath) || !fs.existsSync(preflightModulePath)) {
+  if (
+    !fs.existsSync(installModulePath)
+    || !fs.existsSync(installApplicationModulePath)
+    || !fs.existsSync(preflightModulePath)
+  ) {
     throw new Error('Local CLI build output is missing. Run without --no-build first.');
   }
-  const [installModule, preflightModule, terminateModule] = await Promise.all([
+  const [installModule, installApplicationModule, preflightModule] = await Promise.all([
     import(pathToFileURL(installModulePath).href),
+    import(pathToFileURL(installApplicationModulePath).href),
     import(pathToFileURL(preflightModulePath).href),
-    fs.existsSync(terminateModulePath)
-      ? import(pathToFileURL(terminateModulePath).href)
-      : Promise.resolve({}),
   ]);
   return {
     executeInstallCommand: installModule.executeInstallCommand,
+    exactRuntimePreflightDependencies: installApplicationModule.exactRuntimePreflightDependencies,
     runInstallPreflight: preflightModule.runInstallPreflight,
     probeManagedRuntimeCandidate: preflightModule.probeManagedRuntimeCandidate,
-    terminateSatoriServers: terminateModule.terminateSatoriServers,
   };
 }
 
 function assertActivationOwner(owner) {
-  for (const name of ['executeInstallCommand', 'runInstallPreflight', 'probeManagedRuntimeCandidate']) {
+  for (const name of [
+    'executeInstallCommand',
+    'exactRuntimePreflightDependencies',
+    'runInstallPreflight',
+    'probeManagedRuntimeCandidate',
+  ]) {
     if (typeof owner?.[name] !== 'function') {
       throw new Error(`Local CLI activation owner does not export ${name}().`);
     }
@@ -249,21 +256,10 @@ export async function installLocalMcpRuntime(options = {}) {
   const activationOwner = options.activationOwner || await loadActivationOwner(repoRoot);
   assertActivationOwner(activationOwner);
 
-  if (typeof activationOwner.terminateSatoriServers === 'function') {
-    const termResult = await activationOwner.terminateSatoriServers({
-      homeDir,
-      env: inheritedEnvironment,
-    });
-    if (termResult?.status === 'partial') {
-      throw new Error('Cannot safely activate local runtime: Satori server state is only partially verified.');
-    }
-    if (termResult?.terminated?.length) {
-      logger.log(`Terminated ${termResult.terminated.length} active background Satori server(s) before activation.`);
-    }
-  }
   const runtimeCommand = { command: nodePath, args: [runtimeEntry] };
   const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'packages', 'mcp', 'package.json'), 'utf8'));
   const expectedVersion = packageJson.version;
+  const preflightDependencies = activationOwner.exactRuntimePreflightDependencies(runtimeCommand);
   const preflightRunner = async (input, dependencies) => {
     const result = await activationOwner.runInstallPreflight(input, dependencies);
     await activationOwner.probeManagedRuntimeCandidate({
@@ -281,6 +277,7 @@ export async function installLocalMcpRuntime(options = {}) {
     runtimeCommand,
     potionAssetsRoot: path.join(repoRoot, 'packages', 'mcp', 'assets', 'potion', 'linux-x64'),
     env: inheritedEnvironment,
+    preflightDependencies,
     preflightRunner,
   });
 

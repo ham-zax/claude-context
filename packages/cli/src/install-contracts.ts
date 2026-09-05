@@ -11,6 +11,7 @@ import type {
     InstallPreflightInput,
     InstallPreflightResult,
 } from "./install-preflight.js";
+import type { TerminateOptions, TerminateResult } from "./terminate.js";
 import type {
     LateOnAuthorityLoader,
     LateOnModelProgressReporter,
@@ -156,6 +157,7 @@ export interface InstallCommandOptions {
         input: InstallPreflightInput,
         dependencies?: InstallPreflightDependencies,
     ) => Promise<InstallPreflightResult>;
+    terminateRunner?: (options?: TerminateOptions) => Promise<TerminateResult>;
 }
 
 export interface ClientInstallResult {

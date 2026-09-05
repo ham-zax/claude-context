@@ -89,6 +89,7 @@ export function prepareLauncherInstall(
         command: runtimeCommand.command,
         args: runtimeCommand.args,
         managedEnv,
+        managedLauncherPath: launcherPath,
         ...(managedRuntimeRoot ? { managedRuntimeRoot } : {}),
     });
     return {

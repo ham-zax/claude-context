@@ -285,12 +285,24 @@ test("managed launcher holds an exact runtime lease for its process lifetime", a
             shutdownGraceMs: 100,
         }), "utf8");
 
+        const leasesRoot = path.join(homeDir, ".satori", "mcp-runtime", ".leases");
+        fs.mkdirSync(leasesRoot, { recursive: true });
+        fs.writeFileSync(path.join(leasesRoot, "dead.json"), JSON.stringify({
+            formatVersion: 1,
+            leaseId: "dead",
+            pid: 2_147_483_646,
+            runtimeRoot: current,
+            acquiredAt: new Date(0).toISOString(),
+        }), "utf8");
+        const malformedLease = path.join(leasesRoot, "malformed.json");
+        fs.writeFileSync(malformedLease, "", "utf8");
+        fs.utimesSync(malformedLease, new Date(0), new Date(0));
+
         const launcher = spawn(process.execPath, [launcherPath], {
             stdio: ["pipe", "pipe", "pipe"],
         });
         const launcherClosed = once(launcher, "close");
         const runtimeReady = once(launcher.stdout, "data");
-        const leasesRoot = path.join(homeDir, ".satori", "mcp-runtime", ".leases");
         try {
             await waitFor(() => (
                 fs.existsSync(leasesRoot)
@@ -321,6 +333,48 @@ test("managed launcher holds an exact runtime lease for its process lifetime", a
                 await launcherClosed;
             }
         }
+    });
+});
+
+test("retired managed launcher cohort cannot reacquire a runtime lease", async () => {
+    await withTempHome(async (homeDir) => {
+        const current = writeRuntime(homeDir, "6.7.0");
+        const activeLauncherPath = path.join(homeDir, ".satori", "bin", "satori-mcp.js");
+        fs.mkdirSync(path.dirname(activeLauncherPath), { recursive: true });
+        fs.writeFileSync(activeLauncherPath, buildLauncherScript({
+            command: process.execPath,
+            args: ["-e", "setInterval(() => {}, 1000)"],
+            managedRuntimeRoot: current,
+            managedEnv: { SATORI_RUNTIME_PROFILE: "connected" },
+        }), "utf8");
+
+        const staleLauncherPath = path.join(homeDir, "stale-satori-mcp.js");
+        fs.writeFileSync(staleLauncherPath, buildLauncherScript({
+            command: process.execPath,
+            args: ["-e", "setInterval(() => {}, 1000)"],
+            managedRuntimeRoot: current,
+            managedEnv: { SATORI_RUNTIME_PROFILE: "voyage" },
+        }), "utf8");
+
+        const staleLauncher = spawn(process.execPath, [staleLauncherPath], {
+            stdio: ["ignore", "ignore", "pipe"],
+        });
+        let stderr = "";
+        staleLauncher.stderr.setEncoding("utf8");
+        staleLauncher.stderr.on("data", (chunk) => {
+            stderr += chunk;
+        });
+        const [exitCode] = await once(staleLauncher, "close") as [number | null, NodeJS.Signals | null];
+
+        assert.equal(exitCode, 1);
+        assert.match(stderr, /retired runtime cohort/);
+        const leasesRoot = path.join(homeDir, ".satori", "mcp-runtime", ".leases");
+        assert.equal(
+            fs.existsSync(leasesRoot)
+                ? fs.readdirSync(leasesRoot).some((entry) => entry.endsWith(".json"))
+                : false,
+            false,
+        );
     });
 });
 

@@ -3,11 +3,16 @@
  * Used by packages/cli install and scripts/install-local-mcp-runtime.mjs.
  */
 
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+
 export const DEFAULT_LAUNCHER_SHUTDOWN_GRACE_MS = 5_000;
 const EOF_SHUTDOWN_GRACE_MS = 1_500;
 const COMMAND_PREFIX = "const command = ";
 const ARGS_PREFIX = "const baseArgs = ";
 const MANAGED_ENV_PREFIX = "const managedEnv = ";
+const COHORT_TOKEN_PREFIX = "const managedCohortToken = ";
 
 function parseJsonAssignment(content, prefix, malformedMessage) {
   const line = content.split(/\r?\n/).find((candidate) => candidate.startsWith(prefix));
@@ -57,6 +62,18 @@ export function parseManagedLauncherEnvironment(content) {
  * @param {string} content
  * @returns {{ command: string, args: readonly string[], managedEnv: Readonly<Record<string, string>> }}
  */
+export function parseManagedLauncherCohortToken(content) {
+  const token = parseJsonAssignment(
+    content,
+    COHORT_TOKEN_PREFIX,
+    "Managed launcher cohort identity is malformed.",
+  );
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Managed launcher cohort identity is malformed.");
+  }
+  return token;
+}
+
 export function parseManagedLauncherDescriptor(content) {
   const command = parseJsonAssignment(content, COMMAND_PREFIX, "Managed launcher command is malformed.");
   const args = parseJsonAssignment(content, ARGS_PREFIX, "Managed launcher arguments are malformed.");
@@ -71,14 +88,44 @@ export function parseManagedLauncherDescriptor(content) {
 }
 
 /**
- * @param {{ command: string, args: readonly string[], managedEnv?: Readonly<Record<string, string>>, managedRuntimeRoot?: string, shutdownGraceMs?: number }} options
+ * @param {{ command: string, args: readonly string[], managedEnv?: Readonly<Record<string, string>>, managedRuntimeRoot?: string, managedLauncherPath?: string, shutdownGraceMs?: number }} options
  * @returns {string}
  */
+function runtimeEntryGenerationIdentity(args) {
+  if (args.length !== 1 || typeof args[0] !== "string") return null;
+  try {
+    const stat = fs.statSync(args[0], { bigint: true });
+    if (!stat.isFile()) return null;
+    return {
+      dev: stat.dev.toString(),
+      ino: stat.ino.toString(),
+      size: stat.size.toString(),
+      mtimeNs: stat.mtimeNs.toString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function buildLauncherScript(options) {
   const command = options.command;
   const args = options.args;
   const managedEnv = options.managedEnv ?? {};
   const managedRuntimeRoot = options.managedRuntimeRoot ?? null;
+  const managedLauncherPath = options.managedLauncherPath
+    ?? (managedRuntimeRoot
+      ? path.join(path.dirname(path.dirname(managedRuntimeRoot)), "bin", "satori-mcp.js")
+      : null);
+  const runtimeEntryGeneration = runtimeEntryGenerationIdentity(args);
+  const managedCohortToken = crypto.createHash("sha256")
+    .update(JSON.stringify({
+      command,
+      args,
+      managedEnv,
+      managedRuntimeRoot,
+      runtimeEntryGeneration,
+    }))
+    .digest("hex");
   const shutdownGraceMs = Number.isFinite(options.shutdownGraceMs) && options.shutdownGraceMs >= 0
     ? Math.floor(options.shutdownGraceMs)
     : DEFAULT_LAUNCHER_SHUTDOWN_GRACE_MS;
@@ -96,6 +143,8 @@ export function buildLauncherScript(options) {
     `const baseArgs = ${JSON.stringify(args)};`,
     `const managedEnv = ${JSON.stringify(managedEnv)};`,
     `const managedRuntimeRoot = ${JSON.stringify(managedRuntimeRoot)};`,
+    `const managedLauncherPath = ${JSON.stringify(managedLauncherPath)};`,
+    `const managedCohortToken = ${JSON.stringify(managedCohortToken)};`,
     `const shutdownGraceMs = ${JSON.stringify(shutdownGraceMs)};`,
     "const effectiveEnv = { ...process.env, ...managedEnv };",
     "const runtimeEntry = baseArgs[0];",
@@ -105,6 +154,8 @@ export function buildLauncherScript(options) {
     "",
     "let runtimeLeasePath = null;",
     "try {",
+    "  assertCurrentManagedCohort();",
+    '  process.title = `satori-mcp:${managedCohortToken.slice(0, 24)}`;',
     "  runtimeLeasePath = acquireManagedRuntimeLease();",
     "} catch (error) {",
     '  console.error(`Failed to acquire managed runtime lease: ${error instanceof Error ? error.message : String(error)}`);',
@@ -322,16 +373,59 @@ export function buildLauncherScript(options) {
     '  throw new Error("Timed out waiting for managed runtime cleanup to finish.");',
     "}",
     "",
+    "function pruneDeadManagedRuntimeLeases(leasesRoot) {",
+    "  let entries = [];",
+    "  try { entries = fs.readdirSync(leasesRoot, { withFileTypes: true }); } catch { return; }",
+    "  for (const entry of entries) {",
+    '    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;',
+    "    const leasePath = path.join(leasesRoot, entry.name);",
+    '    let lease = null;',
+    '    try { lease = JSON.parse(fs.readFileSync(leasePath, "utf8")); } catch {}',
+    "    if (lease && Number.isSafeInteger(lease.pid) && lease.pid > 0) {",
+    "      if (!processIdentityIsLive(lease)) {",
+    "        try { fs.rmSync(leasePath, { force: true }); } catch {}",
+    "      }",
+    "      continue;",
+    "    }",
+    "    // Lease publication is atomic, so an old malformed final .json cannot be an in-flight write.",
+    "    try {",
+    "      if (Date.now() - fs.statSync(leasePath).mtimeMs >= 30000) {",
+    "        fs.rmSync(leasePath, { force: true });",
+    "      }",
+    "    } catch {}",
+    "  }",
+    "}",
+    "",
+    "function assertCurrentManagedCohort() {",
+    "  if (!managedLauncherPath || !fs.existsSync(managedLauncherPath)) return;",
+    '  const activeContent = fs.readFileSync(managedLauncherPath, "utf8");',
+    '  const activeTokenLine = activeContent.split(/\\r?\\n/).find((line) => line.startsWith("const managedCohortToken = "));',
+    "  if (!activeTokenLine || !activeTokenLine.endsWith(\";\")) {",
+    '    throw new Error("Active managed Satori launcher has no verifiable runtime cohort identity.");',
+    "  }",
+    "  let activeToken = null;",
+    '  try { activeToken = JSON.parse(activeTokenLine.slice("const managedCohortToken = ".length, -1)); } catch {}',
+    "  if (activeToken !== managedCohortToken) {",
+    '    throw new Error("This Satori launcher belongs to a retired runtime cohort. Restart the MCP client so it uses the active launcher.");',
+    "  }",
+    "}",
+    "",
     "function acquireManagedRuntimeLease() {",
-    "  if (!managedRuntimeRoot) return null;",
-    "  if (!fs.existsSync(managedRuntimeRoot)) {",
+    "  if (managedRuntimeRoot && !fs.existsSync(managedRuntimeRoot)) {",
     '    throw new Error(`Managed runtime no longer exists at ${managedRuntimeRoot}.`);',
     "  }",
-    "  const storageRoot = path.dirname(managedRuntimeRoot);",
+    "  const storageRoot = managedRuntimeRoot",
+    "    ? path.dirname(managedRuntimeRoot)",
+    '    : managedLauncherPath ? path.join(path.dirname(path.dirname(managedLauncherPath)), "mcp-runtime") : null;',
+    "  if (!storageRoot) return null;",
+    "  fs.mkdirSync(storageRoot, { recursive: true });",
     "  const lock = acquireLeaseLock(storageRoot);",
     "  try {",
+    "    assertCurrentManagedCohort();",
+    "    if (!managedRuntimeRoot) return null;",
     '    const leasesRoot = path.join(storageRoot, ".leases");',
     "    fs.mkdirSync(leasesRoot, { recursive: true });",
+    "    pruneDeadManagedRuntimeLeases(leasesRoot);",
     "    const leaseId = crypto.randomUUID();",
     '    const leasePath = path.join(leasesRoot, `${leaseId}.json`);',
     "    const identity = currentProcessIdentity();",

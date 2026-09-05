@@ -74,6 +74,7 @@ export {
 import {
     acquireManagedRuntimeMutationLock,
 } from "./managed-runtime-store.js";
+import { activateAfterRetiringManagedRuntime } from "./runtime-activation.js";
 import {
     DEFAULT_LATEON_PROFILE_ID,
     LATEON_D32_ACTIVATION_POLICY,
@@ -317,7 +318,13 @@ export async function executeInstallCommand(
         throw error;
     }
     try {
-        const result = applyInstallPlan(plan, preflight);
+        const result = command.kind === "install" && !command.dryRun
+            ? await activateAfterRetiringManagedRuntime({
+                homeDir,
+                env,
+                terminateRunner: options.terminateRunner,
+            }, () => applyInstallPlan(plan, preflight))
+            : applyInstallPlan(plan, preflight);
         if (managedRuntimeCandidate) {
             pruneManagedRuntimeAfterActivation(
                 homeDir,
