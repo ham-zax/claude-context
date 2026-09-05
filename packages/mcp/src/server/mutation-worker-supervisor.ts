@@ -7,6 +7,7 @@ const MUTATION_PARENT_PID_ENV = "SATORI_MUTATION_PARENT_PID";
 const DEFAULT_CANCEL_GRACE_MS = 5_000;
 const PROCESS_GROUP_POLL_MS = 25;
 const PARENT_WATCHDOG_MS = 1_000;
+const MAX_COMPLETION_RESULT_BYTES = 64 * 1024;
 const MUTATION_OPERATION_PHASES = new Set<MutationOperationPhase>([
     "accepted",
     "preflight",
@@ -77,7 +78,11 @@ type WorkerMessage =
         phase?: MutationOperationPhase;
         progress?: number;
     }
-    | { type: "mutation_worker_completed"; operationId: string }
+    | {
+        type: "mutation_worker_completed";
+        operationId: string;
+        result?: Readonly<Record<string, unknown>>;
+    }
     | { type: "mutation_worker_cancelled"; operationId: string; reason?: string }
     | { type: "mutation_worker_failed"; operationId: string; error: string };
 
@@ -103,6 +108,7 @@ export type SupervisedMutationWorkerOptions = Readonly<{
     onHeartbeat?: () => void;
     onProgress?: (progress: MutationWorkerProgress) => void;
     onNoProgress?: () => void;
+    onCompleted?: (result?: Readonly<Record<string, unknown>>) => void;
 }>;
 
 export type SupervisedMutationWorker = Readonly<{
@@ -185,8 +191,16 @@ function isWorkerMessage(value: unknown): value is WorkerMessage {
     switch (record.type) {
         case "mutation_worker_ready":
         case "mutation_worker_heartbeat":
-        case "mutation_worker_completed":
             return true;
+        case "mutation_worker_completed": {
+            if (record.result === undefined) return true;
+            if (!record.result || typeof record.result !== "object" || Array.isArray(record.result)) return false;
+            try {
+                return Buffer.byteLength(JSON.stringify(record.result), "utf8") <= MAX_COMPLETION_RESULT_BYTES;
+            } catch {
+                return false;
+            }
+        }
         case "mutation_worker_progress":
             return Number.isSafeInteger(record.sequence)
                 && (record.sequence as number) >= 0
@@ -460,6 +474,7 @@ export function spawnSupervisedMutationWorker(
                 return;
             }
             if (terminalMessage?.type === "mutation_worker_completed" && !forced) {
+                options.onCompleted?.(terminalMessage.result);
                 resolveCompletion();
                 return;
             }
@@ -515,7 +530,7 @@ export type MutationWorkerRuntime = Readonly<{
     started: Promise<void>;
     heartbeat(): void;
     progress(input?: { phase?: MutationOperationPhase; progress?: number }): void;
-    complete(): void;
+    complete(result?: Readonly<Record<string, unknown>>): void;
     cancel(reason?: string): void;
     fail(error: unknown): void;
 }>;
@@ -635,7 +650,34 @@ export function createMutationWorkerRuntime(): MutationWorkerRuntime {
                 ...(input.progress !== undefined ? { progress: input.progress } : {}),
             });
         },
-        complete: () => finish({ type: "mutation_worker_completed", operationId }),
+        complete: (result?: Readonly<Record<string, unknown>>) => {
+            if (result !== undefined) {
+                let serialized: string;
+                try {
+                    serialized = JSON.stringify(result);
+                } catch (error) {
+                    finish({
+                        type: "mutation_worker_failed",
+                        operationId,
+                        error: `Mutation worker completion result is not serializable: ${error instanceof Error ? error.message : String(error)}`,
+                    });
+                    return;
+                }
+                if (Buffer.byteLength(serialized, "utf8") > MAX_COMPLETION_RESULT_BYTES) {
+                    finish({
+                        type: "mutation_worker_failed",
+                        operationId,
+                        error: `Mutation worker completion result exceeds ${MAX_COMPLETION_RESULT_BYTES} bytes.`,
+                    });
+                    return;
+                }
+            }
+            finish({
+                type: "mutation_worker_completed",
+                operationId,
+                ...(result !== undefined ? { result } : {}),
+            });
+        },
         cancel: (reason?: string) => finish({
             type: "mutation_worker_cancelled",
             operationId,

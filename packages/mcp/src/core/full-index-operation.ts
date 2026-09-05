@@ -3,6 +3,7 @@ import {
     Context,
     deleteCollectionWithVerification,
     type CustomIndexPolicyUpdate,
+    type IndexCodebaseResult,
     type ObservedResolvedIndexPolicy,
 } from "@zokizuan/satori-core";
 import type { SyncManager, WatcherBootstrapCapture } from "./sync.js";
@@ -16,6 +17,19 @@ export interface FullIndexOperationInput {
     readonly forceReindex: boolean;
     readonly policyUpdate?: CustomIndexPolicyUpdate;
 }
+
+export type FullIndexCandidateRunner = (input: Readonly<{
+    codebasePath: string;
+    forceReindex: boolean;
+    indexPolicy: ObservedResolvedIndexPolicy;
+    deferPartialPublication: boolean;
+    onProgress: (progress: {
+        phase: string;
+        current: number;
+        total: number;
+        percentage: number;
+    }) => void;
+}>) => Promise<IndexCodebaseResult>;
 
 export interface FullIndexOperationHost {
     readonly context: Context;
@@ -46,7 +60,25 @@ function isCollectionLimitError(error: unknown): boolean {
 }
 
 export class FullIndexOperation {
-    constructor(private readonly host: FullIndexOperationHost) {}
+    constructor(
+        private readonly host: FullIndexOperationHost,
+        private readonly candidateRunner?: FullIndexCandidateRunner,
+    ) {}
+
+    private runCandidate(input: Parameters<FullIndexCandidateRunner>[0]): Promise<IndexCodebaseResult> {
+        if (this.candidateRunner) {
+            return this.candidateRunner(input);
+        }
+        return this.host.context.indexCodebase(
+            input.codebasePath,
+            input.onProgress,
+            input.forceReindex,
+            {
+                deferPartialPublication: input.deferPartialPublication,
+                indexPolicy: input.indexPolicy,
+            },
+        );
+    }
 
     public async cleanupUnpublishedCandidateCollection(
         codebasePath: string,
@@ -156,14 +188,17 @@ export class FullIndexOperation {
             const embedding = this.host.context.getEmbeddingEngine();
             console.log(`[BACKGROUND-INDEX] 🧠 Using embedding provider: ${embedding.getProvider()} with dimension: ${embedding.getDimension()}`);
             console.log("[BACKGROUND-INDEX] 🚀 Core is constructing the full publication candidate...");
-            const stats = await this.host.context.indexCodebase(absolutePath, (progress) => {
-                this.host.mutationRuntime.assertCurrent(absolutePath);
-                const publicProgress = Math.min(progress.percentage, 99);
-                publishBackgroundPhase("writing", { progress: publicProgress });
-                console.log(`[BACKGROUND-INDEX] Progress: ${progress.phase} - ${progress.percentage}% (${progress.current}/${progress.total})`);
-            }, forceReindex, {
-                deferPartialPublication: previousCompleteGeneration !== null,
+            const stats = await this.runCandidate({
+                codebasePath: absolutePath,
+                forceReindex,
                 indexPolicy: candidatePolicy,
+                deferPartialPublication: previousCompleteGeneration !== null,
+                onProgress: (progress) => {
+                    this.host.mutationRuntime.assertCurrent(absolutePath);
+                    const publicProgress = Math.min(progress.percentage, 99);
+                    publishBackgroundPhase("writing", { progress: publicProgress });
+                    console.log(`[BACKGROUND-INDEX] Progress: ${progress.phase} - ${progress.percentage}% (${progress.current}/${progress.total})`);
+                },
             });
             targetCollectionName = stats.collectionName;
             candidatePublicationId = stats.publication.id;
