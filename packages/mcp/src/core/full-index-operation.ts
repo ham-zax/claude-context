@@ -244,7 +244,8 @@ export class FullIndexOperation {
             if (stats.status === "completed") {
                 const publication = this.host.context.getCurrentPublication(absolutePath);
                 if (
-                    publication?.id !== stats.publication.id
+                    !publication
+                    || publication.id !== stats.publication.id
                     || publication.publication.vector.collectionName !== targetCollectionName
                     || publication.publication.vector.totalChunks !== stats.totalChunks
                 ) {

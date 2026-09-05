@@ -64,6 +64,7 @@ export {
 } from './embedding/voyageai-embedding';
 export type {
     CustomIndexPolicyUpdate,
+    IndexCodebaseResult,
     ObservedResolvedIndexPolicy,
     PublicationLease,
     PublicationNavigationStatus,
