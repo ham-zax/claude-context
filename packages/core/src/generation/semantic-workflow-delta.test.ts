@@ -26,8 +26,7 @@ type WorkflowNavigationInternals = {
         assertMutationCurrent?: () => void,
         analysisByFile?: Map<string, unknown>,
         indexPolicy?: unknown,
-        semanticSources?: readonly { path: string; source: string; sourceHash: string }[],
-        capturedSources?: readonly { path: string; source: string; sourceHash: string }[],
+        capturedSources?: readonly { path: string; sourceHash: string }[],
     ): Promise<{
         publicationId: string;
         navigationRoot: string;
@@ -168,8 +167,8 @@ test('IndexGenerationWorkflow delta rebuild: source-only delta triggers semantic
         const initialPublicationId = 'publication-initial';
         const initialNavigationRoot = path.join(stateRoot, initialPublicationId, 'navigation');
         const initialSources = [
-            { path: fileA, source: contentA1, sourceHash: manifestA1.hash },
-            { path: fileB, source: contentB1, sourceHash: manifestB1.hash },
+            { path: fileA, sourceHash: manifestA1.hash },
+            { path: fileB, sourceHash: manifestB1.hash },
         ];
         const initialPublication = await internals.stageSymbolRegistryForCompletedIndex(
             tmpDir,
@@ -180,7 +179,6 @@ test('IndexGenerationWorkflow delta rebuild: source-only delta triggers semantic
             undefined,
             undefined,
             undefined,
-            initialSources,
             initialSources,
         );
         assert.ok(initialPublication);
@@ -338,7 +336,7 @@ test('IndexGenerationWorkflow delta rebuild: go.mod/go.work deltas trigger whole
         // 1. Initial navigation Publication observes auxiliary go.mod.
         const initialPublicationId = 'publication-initial';
         const initialNavigationRoot = path.join(stateRoot, initialPublicationId, 'navigation');
-        const initialSources = [{ path: fileA, source: contentA, sourceHash: manifestA.hash }];
+        const initialSources = [{ path: fileA, sourceHash: manifestA.hash }];
         const initialPublication = await internals.stageSymbolRegistryForCompletedIndex(
             tmpDir,
             initialPublicationId,
@@ -348,7 +346,6 @@ test('IndexGenerationWorkflow delta rebuild: go.mod/go.work deltas trigger whole
             undefined,
             undefined,
             undefined,
-            initialSources,
             initialSources,
         );
         assert.ok(initialPublication);

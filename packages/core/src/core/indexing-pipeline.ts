@@ -30,7 +30,7 @@ import type {
 import type { RepositoryRelativePath } from '../paths/repository-path';
 import type { RelationshipAnalysisEvidence } from '../relationships';
 import { defaultSemanticLanguageRegistry, type SemanticLanguageRegistry } from '../semantic/descriptor';
-import type { SemanticProjectAnalyzer, SemanticSourceFile } from '../semantic';
+import type { SemanticProjectAnalyzer } from '../semantic';
 import {
     openRegularFileInsideRoot,
     readFileHandleExactly,
@@ -103,7 +103,6 @@ export type ProcessedFileList = Readonly<{
     symbolRecords: SymbolRecord[];
     symbolManifestFiles: SymbolRegistryManifestFile[];
     analysisByFile: Map<string, RelationshipAnalysisEvidence>;
-    semanticSources?: readonly SemanticSourceFile[];
     sourceFiles: readonly IndexedSourceFileObservation[];
     performance: IndexingPipelineMetrics;
 }>;
@@ -489,7 +488,6 @@ export class IndexingPipeline {
         const symbolRecords: SymbolRecord[] = [];
         const symbolManifestFiles: SymbolRegistryManifestFile[] = [];
         const analysisByFile = new Map<string, RelationshipAnalysisEvidence>();
-        const semanticSources: SemanticSourceFile[] = [];
         const sourceFiles: IndexedSourceFileObservation[] = [];
         const performance: IndexingPipelineMetrics = {
             analysisMs: 0,
@@ -569,13 +567,6 @@ export class IndexingPipeline {
                     sourceHash: analyzed.sourceHash,
                     sourceStat: analyzed.sourceStat,
                 });
-                if (this.semanticAnalyzer?.supportsLanguage(analyzed.language)) {
-                    semanticSources.push({
-                        path: analyzed.relativePath,
-                        source: analyzed.source,
-                        sourceHash: analyzed.sourceHash,
-                    });
-                }
                 symbolRecords.push(...symbolFacts.symbolRecords);
                 symbolManifestFiles.push(symbolFacts.manifestFile);
                 performance.analysisMs += Date.now() - analysisStartedAt;
@@ -686,7 +677,6 @@ export class IndexingPipeline {
             symbolRecords,
             symbolManifestFiles,
             analysisByFile,
-            ...(semanticSources.length > 0 ? { semanticSources } : {}),
             sourceFiles,
             performance,
         };

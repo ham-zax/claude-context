@@ -294,7 +294,6 @@ export class IndexGenerationWorkflow {
         assertMutationCurrent?: () => void,
         suppliedAnalysisByFile?: Map<string, RelationshipAnalysisEvidence>,
         indexPolicy?: ResolvedIndexPolicy,
-        semanticSources?: readonly SemanticSourceFile[],
         capturedSources?: readonly IndexedSourceFileObservation[],
     ): Promise<StagedPublicationNavigation | undefined> {
         if (indexPolicy) {
@@ -360,21 +359,45 @@ export class IndexGenerationWorkflow {
 
 
         const semanticEvidenceByLanguage = new Map<string, SemanticProjectEvidence>();
-        if (this.ports.semanticAnalyzer && semanticSources && semanticSources.length > 0) {
-            const sourcesByLanguage = new Map<string, SemanticSourceFile[]>();
-            const registry = this.ports.semanticLanguageRegistry ?? defaultSemanticLanguageRegistry;
-
-            for (const src of semanticSources) {
-                const fileEntry = manifestFiles.find((f) => f.path === src.path);
-                const lang = fileEntry?.language ?? '';
-                if (this.ports.semanticAnalyzer.supportsLanguage(lang)) {
-                    const list = sourcesByLanguage.get(lang) ?? [];
-                    list.push(src);
-                    sourcesByLanguage.set(lang, list);
+        if (this.ports.semanticAnalyzer) {
+            const semanticRegistry = this.ports.semanticLanguageRegistry ?? defaultSemanticLanguageRegistry;
+            const semanticManifestByLanguage = new Map<string, SymbolRegistryManifestFile[]>();
+            for (const file of manifestFiles) {
+                if (!this.ports.semanticAnalyzer.supportsLanguage(file.language)) {
+                    continue;
                 }
+                const list = semanticManifestByLanguage.get(file.language) ?? [];
+                list.push(file);
+                semanticManifestByLanguage.set(file.language, list);
             }
-            for (const [language, sourceFiles] of sourcesByLanguage) {
-                const auxiliaryFiles = this.collectSemanticAuxiliariesForLanguage(codebasePath, language, registry);
+
+            for (const [language, semanticFiles] of semanticManifestByLanguage) {
+                const sourceFiles: SemanticSourceFile[] = [];
+                for (const file of semanticFiles) {
+                    const absoluteFile = path.resolve(canonicalRoot, file.path);
+                    const sourceObservation = await this.ports.readIndexableFileObservationInsideRoot(
+                        absoluteFile,
+                        canonicalRoot,
+                        indexPolicy,
+                    );
+                    if (sourceObservation === null) {
+                        throw new Error(`Semantic source no longer satisfies the active policy for '${file.path}'.`);
+                    }
+                    if (sourceObservation.sourceHash !== file.hash) {
+                        throw new Error(`Source changed before semantic navigation publication for '${file.path}'.`);
+                    }
+                    sourceFiles.push({
+                        path: file.path,
+                        source: sourceObservation.content,
+                        sourceHash: sourceObservation.sourceHash,
+                    });
+                }
+
+                const auxiliaryFiles = this.collectSemanticAuxiliariesForLanguage(
+                    codebasePath,
+                    language,
+                    semanticRegistry,
+                );
                 const evidence = await this.ports.semanticAnalyzer.analyze({
                     language,
                     sourceFiles,
@@ -615,7 +638,6 @@ export class IndexGenerationWorkflow {
                     options.assertMutationCurrent,
                     result.analysisByFile,
                     indexPolicy,
-                    result.semanticSources,
                     result.sourceFiles,
                 );
                 navigationMs = Date.now() - navigationStartedAt;

@@ -43,7 +43,7 @@ function createMockEmbedding(): Embedding {
 
 import type { RepositoryRelativePath } from '../paths/repository-path';
 
-test('IndexingPipeline does not retain semanticSources when semantic analyzer supports no languages', async () => {
+test('IndexingPipeline has no full-source semantic retention channel when semantic analyzer supports no languages', async () => {
     const languageAnalyzer = createLanguageAnalysisService();
     const pipeline = new IndexingPipeline({
         getVectorDatabase: () => createMockVectorDb(),
@@ -74,7 +74,7 @@ test('IndexingPipeline does not retain semanticSources when semantic analyzer su
     });
 
     assert.equal(result.processedFiles, 0);
-    assert.equal(result.semanticSources, undefined);
+    assert.equal('semanticSources' in result, false);
 });
 
 
@@ -83,7 +83,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 
-test('IndexingPipeline retains exact source and sourceHash when semantic analyzer supports language', async () => {
+test('IndexingPipeline retains only source snapshot metadata when semantic analyzer supports language', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-indexing-pipeline-test-'));
     try {
         const goContent = 'package main\n\nfunc main() {\n    println("hello")\n}\n';
@@ -128,12 +128,12 @@ test('IndexingPipeline retains exact source and sourceHash when semantic analyze
         });
 
         assert.equal(result.processedFiles, 1);
-        assert.ok(result.semanticSources);
-        assert.equal(result.semanticSources.length, 1);
-        assert.equal(result.semanticSources[0].path, 'main.go');
-        assert.equal(result.semanticSources[0].source, goContent);
+        assert.equal('semanticSources' in result, false);
+        assert.equal(result.sourceFiles.length, 1);
+        assert.equal(result.sourceFiles[0].path, 'main.go');
         const expectedHash = crypto.createHash('sha256').update(goContent, 'utf8').digest('hex');
-        assert.equal(result.semanticSources[0].sourceHash, expectedHash);
+        assert.equal(result.sourceFiles[0].sourceHash, expectedHash);
+        assert.equal('source' in result.sourceFiles[0], false);
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }
