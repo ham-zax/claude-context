@@ -8,6 +8,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 export const DEFAULT_LAUNCHER_SHUTDOWN_GRACE_MS = 5_000;
+export const MANAGED_LAUNCHER_SCOPE_HEX_LENGTH = 24;
+export const MANAGED_LAUNCHER_TITLE_TOKEN_HEX_LENGTH = 48;
 const EOF_SHUTDOWN_GRACE_MS = 1_500;
 const COMMAND_PREFIX = "const command = ";
 const ARGS_PREFIX = "const baseArgs = ";
@@ -117,7 +119,7 @@ export function buildLauncherScript(options) {
       ? path.join(path.dirname(path.dirname(managedRuntimeRoot)), "bin", "satori-mcp.js")
       : null);
   const runtimeEntryGeneration = runtimeEntryGenerationIdentity(args);
-  const managedCohortToken = crypto.createHash("sha256")
+  const cohortDigest = crypto.createHash("sha256")
     .update(JSON.stringify({
       command,
       args,
@@ -126,6 +128,15 @@ export function buildLauncherScript(options) {
       runtimeEntryGeneration,
     }))
     .digest("hex");
+  const managedLauncherScope = managedLauncherPath
+    ? crypto.createHash("sha256")
+      .update(path.resolve(managedLauncherPath))
+      .digest("hex")
+      .slice(0, MANAGED_LAUNCHER_SCOPE_HEX_LENGTH)
+    : null;
+  const managedCohortToken = managedLauncherScope
+    ? `${managedLauncherScope}${cohortDigest.slice(MANAGED_LAUNCHER_SCOPE_HEX_LENGTH)}`
+    : cohortDigest;
   const shutdownGraceMs = Number.isFinite(options.shutdownGraceMs) && options.shutdownGraceMs >= 0
     ? Math.floor(options.shutdownGraceMs)
     : DEFAULT_LAUNCHER_SHUTDOWN_GRACE_MS;
@@ -155,7 +166,9 @@ export function buildLauncherScript(options) {
     "let runtimeLeasePath = null;",
     "try {",
     "  assertCurrentManagedCohort();",
-    '  process.title = `satori-mcp:${managedCohortToken.slice(0, 24)}`;',
+    "  if (managedLauncherPath) {",
+    `    process.title = "satori-mcp:" + managedCohortToken.slice(0, ${MANAGED_LAUNCHER_TITLE_TOKEN_HEX_LENGTH});`,
+    "  }",
     "  runtimeLeasePath = acquireManagedRuntimeLease();",
     "} catch (error) {",
     '  console.error(`Failed to acquire managed runtime lease: ${error instanceof Error ? error.message : String(error)}`);',

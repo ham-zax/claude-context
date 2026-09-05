@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { CliError } from "./errors.js";
 import { resolveLauncherPath } from "./managed-runtime-paths.js";
-import { parseManagedLauncherCohortToken } from "./managed-launcher-script.mjs";
+import {
+    MANAGED_LAUNCHER_SCOPE_HEX_LENGTH,
+    MANAGED_LAUNCHER_TITLE_TOKEN_HEX_LENGTH,
+    parseManagedLauncherCohortToken,
+} from "./managed-launcher-script.mjs";
 import {
     acquireManagedRuntimeLeaseLock,
     inspectManagedRuntimeLeases,
@@ -51,8 +55,11 @@ function listManagedLauncherProcessesDefault(
         return [];
     }
     const resolvedLauncherPath = path.resolve(launcherPath);
+    const activeScopeTitlePrefix = activeCohortToken
+        ? `${LAUNCHER_TITLE_PREFIX}${activeCohortToken.slice(0, MANAGED_LAUNCHER_SCOPE_HEX_LENGTH)}`
+        : undefined;
     const activeTitle = activeCohortToken
-        ? `${LAUNCHER_TITLE_PREFIX}${activeCohortToken.slice(0, 24)}`
+        ? `${LAUNCHER_TITLE_PREFIX}${activeCohortToken.slice(0, MANAGED_LAUNCHER_TITLE_TOKEN_HEX_LENGTH)}`
         : undefined;
     let entries: fs.Dirent[];
     try {
@@ -70,7 +77,11 @@ function listManagedLauncherProcessesDefault(
         if (argv.length === 0) continue;
         const title = argv[0];
         if (title.startsWith(LAUNCHER_TITLE_PREFIX)) {
-            if (activeTitle === undefined || title !== activeTitle) {
+            if (
+                activeScopeTitlePrefix !== undefined
+                && title.startsWith(activeScopeTitlePrefix)
+                && title !== activeTitle
+            ) {
                 pids.push(pid);
             }
             continue;

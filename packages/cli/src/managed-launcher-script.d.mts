@@ -1,4 +1,6 @@
 export declare const DEFAULT_LAUNCHER_SHUTDOWN_GRACE_MS: number;
+export declare const MANAGED_LAUNCHER_SCOPE_HEX_LENGTH: number;
+export declare const MANAGED_LAUNCHER_TITLE_TOKEN_HEX_LENGTH: number;
 
 export declare function parseManagedLauncherEnvironment(content: string): Readonly<Record<string, string>>;
 
