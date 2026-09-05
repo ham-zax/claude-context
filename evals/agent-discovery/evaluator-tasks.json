@@ -64,8 +64,8 @@
         "ownerFile": "packages/mcp/src/core/search-frontdoor.ts",
         "ownerSymbol": "runSearchFrontDoor",
         "ownerSpan": {
-          "startLine": 205,
-          "endLine": 315
+          "startLine": 207,
+          "endLine": 339
         },
         "requiredRelations": [
           {
