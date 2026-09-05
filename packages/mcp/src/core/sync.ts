@@ -922,7 +922,7 @@ export class SyncManager {
                     } else {
                         exactComparisonUnverifiedReason = 'exact_source_comparison_unavailable';
                     }
-                } catch (error) {
+                } catch {
                     exactComparisonUnverifiedReason = 'exact_source_comparison_failed';
                 }
             }

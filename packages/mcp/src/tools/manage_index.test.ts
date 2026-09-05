@@ -71,6 +71,7 @@ test("manage_index public action enum exposes only the current lifecycle set", (
         "reindex",
         "sync",
         "status",
+        "cancel",
         "clear",
     ]);
 
@@ -127,20 +128,15 @@ test("manage_index rejects status detail on non-status actions", async () => {
     assert.match(response.content[0]?.text || "", /detail.*status/i);
 });
 
-test("manage_index tool description lists current actions and process-lifetime operation semantics", () => {
+test("manage_index description documents the current lifecycle contract", () => {
     const description = manageIndexTool.description({} as ToolContext);
     for (const action of MANAGE_INDEX_ACTIONS) {
         assert.match(description, new RegExp(action));
     }
-    assert.match(description, /create\/reindex\/sync\/status\/clear/);
-    assert.match(description, /process-lifetime `operation` projection/);
-    assert.match(description, /not persisted as operation history/);
-    assert.match(description, /After process restart, status derives indexed state from the current Publication/);
-    assert.match(description, /Terminal phases are `completed`, `failed`, and `blocked`/);
-    assert.match(description, /syncStats/);
-    assert.match(description, /added/);
-    assert.match(description, /removed/);
-    assert.match(description, /modified/);
+    assert.match(description, /Managed offline runtimes automatically start or join rebuild-safe background reindex maintenance/i);
+    assert.match(description, /explicit reindex is the operator recovery override/i);
+    assert.match(description, /cancel requires the exact live sync operationId/i);
+    assert.match(description, /process-lifetime diagnostic state, not persistent history/i);
 });
 
 test("manage_index status envelope includes symbolQuality observed registry field", async () => {
@@ -272,20 +268,31 @@ test("manage_index status envelope preserves additive languageCapabilities evide
     assert.equal(payload.languageCapabilities.languages[0].capabilities.callGraph, "ready");
 });
 
-test("manage_index response shape is a JSON envelope in MCP text content", async () => {
+test("manage_index sync uses the supervised local handler without eager provider resolution", async () => {
     const capabilities = new CapabilityResolver(buildConfig());
     const ctx = {
         capabilities,
         workspacePolicy: TEST_WORKSPACE_POLICY,
         providerRuntime: {
             requireToolContext: async () => {
-                throw new Error("Connection closed");
+                throw new Error("sync must not eagerly resolve provider context");
             }
         },
         toolHandlers: {
-            handleSyncCodebase: async () => {
-                throw new Error("should not run");
-            }
+            handleSyncCodebase: async () => ({
+                content: [{
+                    type: "text" as const,
+                    text: JSON.stringify({
+                        tool: "manage_index",
+                        version: 1,
+                        action: "sync",
+                        path: "/repo",
+                        status: "ok",
+                        message: "sync accepted",
+                        humanText: "sync accepted",
+                    }),
+                }],
+            }),
         }
     } as unknown as ToolContext;
 
@@ -293,19 +300,11 @@ test("manage_index response shape is a JSON envelope in MCP text content", async
         action: "sync",
         path: "/repo",
     }, ctx);
+    const payload = JSON.parse(response.content[0].text);
 
-    const raw = response.content[0].text;
-    assert.equal(typeof raw, "string");
-    const payload = JSON.parse(raw);
-    assert.equal(payload.tool, "manage_index");
-    assert.equal(payload.version, 1);
-    assert.equal(typeof payload.action, "string");
-    assert.equal(typeof payload.path, "string");
-    assert.equal(typeof payload.status, "string");
-    assert.ok(
-        typeof payload.message === "string" || typeof payload.humanText === "string",
-        "envelope must expose message and/or humanText",
-    );
+    assert.equal(payload.action, "sync");
+    assert.equal(payload.status, "ok");
+    assert.equal(payload.message, "sync accepted");
 });
 
 test("manage_index returns structured backend diagnostics when provider runtime fails", async () => {
@@ -319,14 +318,14 @@ test("manage_index returns structured backend diagnostics when provider runtime 
             }
         },
         toolHandlers: {
-            handleSyncCodebase: async () => {
+            handleReindexCodebase: async () => {
                 throw new Error("should not run");
             }
         }
     } as unknown as ToolContext;
 
     const response = await manageIndexTool.execute({
-        action: "sync",
+        action: "reindex",
         path: "/repo",
     }, ctx);
     const payload = JSON.parse(response.content[0].text);
@@ -335,7 +334,7 @@ test("manage_index returns structured backend diagnostics when provider runtime 
     assert.equal(payload.version, 1);
     assert.equal(payload.status, "error");
     assert.equal(payload.reason, "vector_backend_unavailable");
-    assert.equal(payload.action, "sync");
+    assert.equal(payload.action, "reindex");
     assert.equal(payload.path, "/repo");
     assert.equal(payload.code, "VECTOR_BACKEND_CONNECTION_CLOSED");
     assert.equal(payload.hints.backend.code, "VECTOR_BACKEND_CONNECTION_CLOSED");

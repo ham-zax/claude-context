@@ -141,7 +141,13 @@ class SessionProviderRuntime {
             undefined,
             shared.runtimeOwnerGate,
             this.continuationCoordinator,
-            { readFileMaxBytes: shared.readFileMaxBytes },
+            {
+                readFileMaxBytes: shared.readFileMaxBytes,
+                ownDetachedMutationCompletion: (completion) => this.providerRuntime.ownDetachedMutationCompletion(completion),
+                requestAutomaticReindex: (codebasePath, reason) => (
+                    this.providerRuntime.requestAutomaticReindex(codebasePath, reason)
+                ),
+            },
         );
         const sessionContext: ToolContext = {
             ...shared,
@@ -189,7 +195,7 @@ export class SharedRuntimeHost {
     private readonly watchSyncEnabled: boolean;
     private activeSessions = 0;
     private activeOperations = 0;
-    private readonly detachedSyncCompletions = new Set<Promise<void>>();
+    private readonly detachedMutationCompletions = new Set<Promise<void>>();
     private shutdownStarted = false;
     private shutdownPromise: Promise<void> | null = null;
     private readonly activityListeners = new Set<() => void>();
@@ -294,7 +300,10 @@ export class SharedRuntimeHost {
                     }
                     return providerContext.context.collectPublicationGarbage(codebasePath);
                 },
-                ownDetachedSyncCompletion: (completion) => this.ownDetachedSyncCompletion(completion),
+                ownDetachedMutationCompletion: (completion) => this.ownDetachedMutationCompletion(completion),
+                requestAutomaticReindex: (codebasePath, reason) => (
+                    this.providerRuntime.requestAutomaticReindex(codebasePath, reason)
+                ),
             },
         );
         const providerRuntime = new SessionProviderRuntime(
@@ -343,24 +352,24 @@ export class SharedRuntimeHost {
         this.notifyActivityChanged();
     }
 
-    private ownDetachedSyncCompletion(completion: Promise<void>): void {
-        if (this.detachedSyncCompletions.has(completion)) return;
-        this.detachedSyncCompletions.add(completion);
+    private ownDetachedMutationCompletion(completion: Promise<void>): void {
+        if (this.detachedMutationCompletions.has(completion)) return;
+        this.detachedMutationCompletions.add(completion);
         this.notifyActivityChanged();
         void completion.then(
-            () => this.releaseDetachedSyncCompletion(completion),
-            () => this.releaseDetachedSyncCompletion(completion),
+            () => this.releaseDetachedMutationCompletion(completion),
+            () => this.releaseDetachedMutationCompletion(completion),
         );
     }
 
-    private releaseDetachedSyncCompletion(completion: Promise<void>): void {
-        if (!this.detachedSyncCompletions.delete(completion)) return;
+    private releaseDetachedMutationCompletion(completion: Promise<void>): void {
+        if (!this.detachedMutationCompletions.delete(completion)) return;
         this.notifyActivityChanged();
     }
 
-    private async drainDetachedSyncCompletions(): Promise<void> {
-        while (this.detachedSyncCompletions.size > 0) {
-            await Promise.allSettled([...this.detachedSyncCompletions]);
+    private async drainDetachedMutationCompletions(): Promise<void> {
+        while (this.detachedMutationCompletions.size > 0) {
+            await Promise.allSettled([...this.detachedMutationCompletions]);
         }
     }
 
@@ -368,7 +377,7 @@ export class SharedRuntimeHost {
         return Object.freeze({
             sessions: this.activeSessions,
             operations: this.activeOperations
-                + this.detachedSyncCompletions.size
+                + this.detachedMutationCompletions.size
                 + this.providerRuntime.getActiveLifecycleOperationCount(),
         });
     }
@@ -393,7 +402,7 @@ export class SharedRuntimeHost {
         this.shutdownStarted = true;
         this.shutdownPromise = (async () => {
             await this.localSyncManager.stopAndDrainLifecycle();
-            await this.drainDetachedSyncCompletions();
+            await this.drainDetachedMutationCompletions();
             await this.localContext.dispose?.();
             await this.providerRuntime.shutdown();
             this.searchContinuationPool.clear();
@@ -403,7 +412,7 @@ export class SharedRuntimeHost {
     }
 }
 
-const SATORI_MCP_INSTRUCTIONS = "Satori is a repository code-intelligence layer for coding agents. Use search_codebase for unfamiliar behavior, ownership, symbols, configuration, or related implementation; then follow recommendedNextAction into read_file, file_outline, continue_search, or call_graph. Prefer the host's native exact-file or literal workflow when the path and location are already known or the edit is small and local. Treat call_graph as conservative navigation evidence, not complete blast-radius proof. Use list_codebases or manage_index status when index readiness is uncertain. Ask before create, reindex, or clear.";
+const SATORI_MCP_INSTRUCTIONS = "Satori is a repository code-intelligence layer for coding agents. Use search_codebase for unfamiliar behavior, ownership, symbols, configuration, or related implementation; then follow recommendedNextAction into read_file, file_outline, continue_search, or call_graph. Prefer the host's native exact-file or literal workflow when the path and location are already known or the edit is small and local. Treat call_graph as conservative navigation evidence, not complete blast-radius proof. Use list_codebases or manage_index status when index readiness is uncertain. Managed offline runtimes automatically rebuild a tracked incompatible Publication in the background; retry after the returned not_ready/indexing hint instead of asking the user to reindex. Explicit reindex remains an operator recovery override, especially for connected/remote providers. Ask before create or clear.";
 
 export class McpSession {
     private readonly server: Server;

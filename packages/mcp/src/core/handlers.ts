@@ -106,6 +106,10 @@ import { prepareRelationshipTraversals } from "./prepared-relationship-traversal
 import { findExactRegistrySymbols } from "./registry-file-outline.js";
 import { ManageMaintenanceHandlers } from "./manage-maintenance-handlers.js";
 import { ManageIndexingHandlers } from "./manage-indexing-handlers.js";
+import type {
+    AutomaticReindexReason,
+    AutomaticReindexScheduleResult,
+} from "./index-maintenance-coordinator.js";
 import {
     SearchContinuationCoordinator,
     SearchContinuationCoordinatorPool,
@@ -365,7 +369,11 @@ export class ToolHandlers {
         options?: {
             readFileMaxBytes?: number;
             collectPublicationGarbageAfterSync?: (codebasePath: string) => Promise<string[]>;
-            ownDetachedSyncCompletion?: (completion: Promise<void>) => void;
+            ownDetachedMutationCompletion?: (completion: Promise<void>) => void;
+            requestAutomaticReindex?: (
+                codebasePath: string,
+                reason: AutomaticReindexReason,
+            ) => Promise<AutomaticReindexScheduleResult>;
         },
     ) {
         this.context = context;
@@ -447,9 +455,11 @@ export class ToolHandlers {
             validateCompletionProof: (codebasePath: string) => this.validateCompletionProof(codebasePath),
             probeLocalSearchCollectionState: (codebasePath: string) => this.probeLocalSearchCollectionState(codebasePath),
             buildCreateHint: this.buildCreateHint.bind(this),
+            buildReindexHint: this.buildReindexHint.bind(this),
             buildStatusHint: this.buildStatusHint.bind(this),
             buildManageIndexRecommendedAction: this.buildManageIndexRecommendedAction.bind(this),
             buildStaleLocalMessage: this.buildStaleLocalMessage.bind(this),
+            requestAutomaticReindex: options?.requestAutomaticReindex,
         };
         this.trackedRootReadiness = new TrackedRootReadiness(trackedRootReadinessHost);
 
@@ -539,7 +549,7 @@ export class ToolHandlers {
             buildSyncHint: this.buildSyncHint.bind(this),
             collectPublicationGarbageAfterSync: options?.collectPublicationGarbageAfterSync
                 ?? ((codebasePath) => this.context.collectPublicationGarbage(codebasePath)),
-            ownDetachedSyncCompletion: options?.ownDetachedSyncCompletion ?? (() => undefined),
+            ownDetachedMutationCompletion: options?.ownDetachedMutationCompletion ?? (() => undefined),
             manageVectorBackendResponse: this.toolResponseBuilders.manageVectorBackendResponse.bind(this.toolResponseBuilders),
             getLiveOwnersSummary: async () => {
                 if (!this.runtimeOwnerGate || typeof this.runtimeOwnerGate.getLiveOwnersSummary !== "function") {
@@ -565,6 +575,7 @@ export class ToolHandlers {
             buildReindexInstruction: this.buildReindexInstruction.bind(this),
             buildManageRequiresReindexHints: this.buildManageRequiresReindexHints.bind(this),
             validateCompletionProof: (codebasePath: string) => this.validateCompletionProof(codebasePath),
+            probeLocalSearchCollectionState: (codebasePath: string) => this.probeLocalSearchCollectionState(codebasePath),
             isZillizBackend: this.isZillizBackend.bind(this),
             dropZillizCollectionForCreate: this.dropZillizCollectionForCreate.bind(this),
             buildCollectionLimitMessage: this.buildCollectionLimitMessage.bind(this),
@@ -577,6 +588,7 @@ export class ToolHandlers {
             setIndexingStats: this.setIndexingStats.bind(this),
             evaluateReindexPreflight: this.evaluateReindexPreflight.bind(this),
             assertIndexMutationCapabilities: this.assertIndexMutationCapabilities.bind(this),
+            ownDetachedMutationCompletion: options?.ownDetachedMutationCompletion ?? (() => undefined),
         };
         this.manageIndexingHandlers = new ManageIndexingHandlers(manageIndexingHandlersHost);
         const searchContext = this.context;
@@ -739,7 +751,7 @@ export class ToolHandlers {
 
     private buildReindexInstruction(codebasePath: string, detail?: string): string {
         const detailLine = detail ? `${detail}\n\n` : '';
-        return `${detailLine}Error: The index at '${codebasePath}' is incompatible with the current runtime and must be rebuilt.\nNext step: call manage_index with {\"action\":\"reindex\",\"path\":\"${codebasePath}\"}.`;
+        return `${detailLine}Error: The index at '${codebasePath}' is incompatible with the current runtime and must be rebuilt.\nAutomatic maintenance did not recover this state. Recovery override: call manage_index with {\"action\":\"reindex\",\"path\":\"${codebasePath}\"}.`;
     }
 
     private buildReindexHint(codebasePath: string): { tool: string; args: { action: string; path: string } } {
@@ -1796,7 +1808,7 @@ export class ToolHandlers {
             file: input.file,
             outline: null,
             hasMore: false,
-            message: `${detailLine}Publication relationship navigation is missing or incompatible. Please run manage_index with {"action":"reindex","path":"${codebasePath}"}.`,
+            message: `${detailLine}Publication relationship navigation is missing or incompatible. Automatic maintenance did not recover this state; use manage_index with {"action":"reindex","path":"${codebasePath}"} as the explicit recovery override.`,
             hints: {
                 reindex: this.buildReindexHint(codebasePath)
             }
@@ -1972,6 +1984,10 @@ export class ToolHandlers {
 
     public async handleReindexCodebase(args: ReindexCodebaseArgs) {
         return this.manageIndexingHandlers.handleReindexCodebase(args);
+    }
+
+    public async startAutomaticReindex(codebasePath: string) {
+        return this.manageIndexingHandlers.startAutomaticReindex(codebasePath);
     }
 
     public async handleSearchCode(args: ToolArgs): Promise<SearchToolTextResponse> {

@@ -68,7 +68,7 @@ type ManageMaintenanceHandlersHost = {
     syncManager: Pick<SyncManager, "assessReadFreshness">;
     trackedRootReadiness: Pick<
         TrackedRootReadiness,
-        "buildMissingLocalCollectionMessage"
+        "buildMissingLocalCollectionMessage" | "prepareTrackedRootForRead"
     >;
     prepareStatusTrackedRootRead(absolutePath: string): Promise<TrackedRootReadinessState>;
     acquirePublicationLease(codebasePath: string): PublicationLease | undefined;
@@ -103,7 +103,7 @@ type ManageMaintenanceHandlersHost = {
     buildManageRequiresReindexHints(codebasePath: string): Record<string, unknown>;
     buildSyncHint(codebasePath: string): Record<string, unknown>;
     collectPublicationGarbageAfterSync(codebasePath: string): Promise<string[]>;
-    ownDetachedSyncCompletion(completion: Promise<void>): void;
+    ownDetachedMutationCompletion(completion: Promise<void>): void;
     buildStaleLocalHint(codebasePath: string, reason: string): Record<string, unknown>;
     buildStaleLocalMessage(codebasePath: string, requestedPath: string, reason: string): string;
     buildReindexHint(codebasePath: string): Record<string, unknown>;
@@ -930,7 +930,22 @@ export class ManageMaintenanceHandlers {
                 { signal: requestSignal },
             );
 
-            this.host.ownDetachedSyncCompletion(mutation.completion);
+            this.host.ownDetachedMutationCompletion(mutation.completion);
+            const postSyncMaintenance = mutation.completion.then(
+                async () => {
+                    const terminal = this.host.mutationRuntime.getOperation(absolutePath);
+                    if (terminal?.id !== mutation.operationId || terminal.phase !== "blocked") return;
+                    try {
+                        await this.host.trackedRootReadiness.prepareTrackedRootForRead(absolutePath);
+                    } catch (error) {
+                        console.warn(
+                            `[SYNC] Post-sync automatic maintenance check failed for '${absolutePath}': ${formatUnknownError(error)}`,
+                        );
+                    }
+                },
+                () => undefined,
+            );
+            this.host.ownDetachedMutationCompletion(postSyncMaintenance);
             void mutation.completion.catch((error: unknown) => {
                 console.error(`[SYNC] Detached supervised sync rejected for '${absolutePath}':`, error);
             });

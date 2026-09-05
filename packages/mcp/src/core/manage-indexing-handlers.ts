@@ -22,6 +22,7 @@ import {
     formatRootMutationBlockedMessage,
     type MutationOperationPhase,
     type RootMutationOperation,
+    type RootMutationStart,
 } from "@zokizuan/satori-core/integration";
 import { FullIndexOperation } from "./full-index-operation.js";
 
@@ -79,6 +80,10 @@ type ManageIndexingHandlersHost = {
     buildReindexInstruction(codebasePath: string, detail?: string): string;
     buildManageRequiresReindexHints(codebasePath: string): Record<string, unknown>;
     validateCompletionProof(codebasePath: string): Promise<CompletionProofValidationResult>;
+    probeLocalSearchCollectionState(codebasePath: string): Promise<{
+        state: "ready" | "missing" | "unknown";
+        collectionName?: string;
+    }>;
     isZillizBackend(): boolean;
     dropZillizCollectionForCreate(collectionName: string): Promise<ZillizCollectionDropResult>;
     buildCollectionLimitMessage(codebasePath: string): Promise<string>;
@@ -97,6 +102,7 @@ type ManageIndexingHandlersHost = {
     setIndexingStats(stats: { indexedFiles: number; totalChunks: number } | null): void;
     evaluateReindexPreflight(codebasePath: string): ReindexPreflightResult;
     assertIndexMutationCapabilities(): void;
+    ownDetachedMutationCompletion(completion: Promise<void>): void;
 };
 
 function collectErrorFragments(
@@ -184,6 +190,7 @@ export class ManageIndexingHandlers {
     private async handleIndexCodebaseInternal(
         args: IndexCodebaseArgs,
         preparedCanonicalRoot?: string,
+        onMutationStarted?: (mutation: RootMutationStart<ToolTextResponse>) => void,
     ): Promise<ToolTextResponse> {
         const { path: codebasePath, force, customExtensions, ignorePatterns, zillizDropCollection } = args;
         const forceReindex = force || false;
@@ -441,6 +448,8 @@ export class ManageIndexingHandlers {
                 }
             });
 
+            onMutationStarted?.(mutation);
+            this.host.ownDetachedMutationCompletion(mutation.completion);
             void mutation.completion.catch((error: unknown) => {
                 console.error(`[BACKGROUND-INDEX] Detached Core mutation rejected for '${absolutePath}':`, error);
             });
@@ -482,6 +491,43 @@ export class ManageIndexingHandlers {
         }
     }
 
+    public async startAutomaticReindex(codebasePath: string): Promise<Readonly<{
+        accepted: boolean;
+        operationId: string;
+        completion: Promise<void> | null;
+    }>> {
+        const currentPolicy = this.host.context.getCurrentPublication(codebasePath)?.publication.policy;
+        let mutationStart: RootMutationStart<ToolTextResponse> | undefined;
+        const response = await this.handleIndexCodebaseInternal(
+            {
+                path: codebasePath,
+                force: true,
+                ...(currentPolicy
+                    ? {
+                        customExtensions: [...currentPolicy.customExtensions],
+                        ignorePatterns: [...currentPolicy.customIgnorePatterns],
+                    }
+                    : {}),
+            },
+            undefined,
+            (mutation) => {
+                mutationStart = mutation;
+            },
+        );
+        let accepted = false;
+        try {
+            const payload = JSON.parse(response.content[0]?.text ?? "{}") as { status?: unknown };
+            accepted = payload.status === "ok";
+        } catch {
+            accepted = false;
+        }
+        return Object.freeze({
+            accepted,
+            operationId: mutationStart?.operationId ?? "",
+            completion: mutationStart?.completion ?? null,
+        });
+    }
+
     public async handleReindexCodebase(args: ReindexCodebaseArgs): Promise<ToolTextResponse> {
         const { path: codebasePath, customExtensions, ignorePatterns, zillizDropCollection, allowUnnecessaryReindex } = args;
         const absolutePathResult = requireAbsoluteFilesystemPath(codebasePath, "path");
@@ -503,9 +549,20 @@ export class ManageIndexingHandlers {
         if (runtimeOwnerConflict) {
             return runtimeOwnerConflict;
         }
-        const preflight = this.host.evaluateReindexPreflight(absolutePath);
+        const [preflight, currentProof, collectionState] = await Promise.all([
+            Promise.resolve(this.host.evaluateReindexPreflight(absolutePath)),
+            this.host.validateCompletionProof(absolutePath),
+            this.host.probeLocalSearchCollectionState(absolutePath),
+        ]);
+        const currentPublicationFullyReady = currentProof.outcome === "valid"
+            && currentProof.navigationStatus === "valid"
+            && collectionState.state === "ready";
 
-        if (preflight.outcome === "reindex_unnecessary_ignore_only" && allowUnnecessaryReindex !== true) {
+        if (
+            preflight.outcome === "reindex_unnecessary_ignore_only"
+            && currentPublicationFullyReady
+            && allowUnnecessaryReindex !== true
+        ) {
             return this.host.manageResponse(
                 "reindex",
                 absolutePath,

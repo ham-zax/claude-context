@@ -18,6 +18,11 @@ import {
 } from "../core/handlers.js";
 import type { RuntimeOwnerMutationGate } from "../core/runtime-owner.js";
 import {
+    IndexMaintenanceCoordinator,
+    type AutomaticReindexReason,
+    type AutomaticReindexScheduleResult,
+} from "../core/index-maintenance-coordinator.js";
+import {
     RootMutationRuntime,
     type SharedPublicationRuntime,
 } from "@zokizuan/satori-core/integration";
@@ -27,6 +32,7 @@ import {
     IndexFingerprint,
     resolveConfiguredEmbeddingDimension,
     resolveRerankerProvider,
+    summarizeIndexFingerprint,
 } from "../config.js";
 import { createEmbeddingInstance, logEmbeddingProviderInfo } from "../embedding.js";
 import {
@@ -246,11 +252,13 @@ export class ProviderRuntime {
     private readonly now: () => number;
     private readonly searchContinuationCoordinator: SearchContinuationCoordinator;
     private readonly onLifecycleActivityChanged?: () => void;
+    private readonly indexMaintenanceCoordinator: IndexMaintenanceCoordinator;
     private embeddingRuntimePromise: Promise<ToolContext> | null = null;
     private vectorRuntimePromise: Promise<ToolContext> | null = null;
     private activeContexts: ToolContext[] = [];
     private readonly activeEmbeddings = new Set<Embedding>();
     private readonly activeRerankers = new Set<Reranker>();
+    private readonly detachedMutationCompletions = new Set<Promise<void>>();
 
     constructor(args: {
         config: ContextMcpConfig;
@@ -281,6 +289,26 @@ export class ProviderRuntime {
             ?? new SearchContinuationCoordinator();
         this.onLifecycleActivityChanged = args.onLifecycleActivityChanged;
         this.now = args.now || (() => Date.now());
+        this.indexMaintenanceCoordinator = new IndexMaintenanceCoordinator({
+            enabled: this.config.executionProfile === "offline",
+            runtimeEpoch: summarizeIndexFingerprint(this.runtimeFingerprint),
+            getActiveMutation: (codebasePath) => this.mutationRuntime.getActiveMutation(codebasePath),
+            getOperation: (codebasePath) => this.mutationRuntime.getOperation(codebasePath),
+            startReindex: async (codebasePath) => {
+                const toolContext = await this.requireToolContext("embedding_vector");
+                if (!("toolHandlers" in toolContext)) {
+                    return Object.freeze({ accepted: false, operationId: "", completion: null });
+                }
+                return toolContext.toolHandlers.startAutomaticReindex(codebasePath);
+            },
+        });
+    }
+
+    public requestAutomaticReindex(
+        codebasePath: string,
+        reason: AutomaticReindexReason,
+    ): Promise<AutomaticReindexScheduleResult> {
+        return this.indexMaintenanceCoordinator.requestAutomaticReindex(codebasePath, reason);
     }
 
     public validate(operation: ProviderBackedOperation): MissingProviderConfigIssue | null {
@@ -388,7 +416,13 @@ export class ProviderRuntime {
                 undefined,
                 this.runtimeOwnerGate,
                 this.searchContinuationCoordinator,
-                { readFileMaxBytes: this.readFileMaxBytes },
+                {
+                    readFileMaxBytes: this.readFileMaxBytes,
+                    ownDetachedMutationCompletion: (completion) => this.ownDetachedMutationCompletion(completion),
+                    requestAutomaticReindex: (codebasePath, reason) => (
+                        this.requestAutomaticReindex(codebasePath, reason)
+                    ),
+                },
             );
 
             await startProviderSyncLifecycle(syncManager, {
@@ -567,14 +601,36 @@ export class ProviderRuntime {
         };
     }
 
+    public ownDetachedMutationCompletion(completion: Promise<void>): void {
+        if (this.detachedMutationCompletions.has(completion)) return;
+        this.detachedMutationCompletions.add(completion);
+        this.onLifecycleActivityChanged?.();
+        void completion.then(
+            () => this.releaseDetachedMutationCompletion(completion),
+            () => this.releaseDetachedMutationCompletion(completion),
+        );
+    }
+
+    private releaseDetachedMutationCompletion(completion: Promise<void>): void {
+        if (!this.detachedMutationCompletions.delete(completion)) return;
+        this.onLifecycleActivityChanged?.();
+    }
+
+    private async drainDetachedMutationCompletions(): Promise<void> {
+        while (this.detachedMutationCompletions.size > 0) {
+            await Promise.allSettled([...this.detachedMutationCompletions]);
+        }
+    }
+
     public getActiveLifecycleOperationCount(): number {
-        return this.activeContexts.reduce(
+        return this.detachedMutationCompletions.size + this.activeContexts.reduce(
             (count, toolContext) => count + toolContext.syncManager.getActiveLifecycleOperationCount(),
             0,
         );
     }
 
     public async shutdown(): Promise<void> {
+        await this.drainDetachedMutationCompletions();
         await Promise.all([
             Promise.all(this.activeContexts.map(async (toolContext) => {
                 toolContext.toolHandlers.releaseSearchContinuationOwnership();
